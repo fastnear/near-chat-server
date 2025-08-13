@@ -1,9 +1,13 @@
 {
-  "name": "sync-server",
-  "version": "0.2.3",
+  "name": "near-chat-server",
+  "version": "0.3.0",
   "main": "index.js",
+  "type": "module",
   "license": "MIT",
   "dependencies": {
+    "@noble/curves": "^1.9.6",
+    "@noble/hashes": "^1.8.0",
+    "base58-js": "^3.0.3",
     "denque": "^2.1.0",
     "dotenv": "^16.4.5",
     "uuid": "^11.0.3",

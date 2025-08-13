@@ -1,4 +1,9 @@
-const fs = require("fs");
+import {
+  binary_to_base58 as toBase58,
+  base58_to_binary as fromBase58,
+} from "base58-js";
+
+import fs from "fs";
 
 function saveJson(json, filename) {
   try {
@@ -25,8 +30,4 @@ function isString(value) {
   return typeof value === "string";
 }
 
-module.exports = {
-  isString,
-  saveJson,
-  loadJson,
-};
+export { isString, saveJson, loadJson, toBase58, fromBase58 };

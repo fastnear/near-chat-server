@@ -1,27 +1,38 @@
-require("dotenv").config();
-const fs = require("fs");
-const Denque = require("denque");
-const { v4: uuidv4 } = require("uuid");
-const { saveJson, loadJson, isString } = require("./utils");
-
-const WebSocket = require("ws");
+import * as dotenv from "dotenv";
+dotenv.config();
+import fs from "fs";
+import Denque from "denque";
+import { v4 as uuidv4 } from "uuid";
+import { saveJson, loadJson, isString } from "./utils.js";
+import {
+  isValidAccountId,
+  verifySignature,
+  isImplicitNearAccount,
+  keyFromString,
+  keyToString,
+  derivePublicKeyFromImplicitAccountId,
+  fetchAndCacheAccessKey,
+} from "./near.js";
+import { WebSocketServer } from "ws";
 
 const MAX_HISTORY = 1000;
 const MAX_CHANNEL_LENGTH = 64;
 const GLOBAL_MESSAGE_QUEUE_SIZE = 1000000;
+const MAX_MESSAGE_DELAY_MS =
+  parseFloat(process.env.MAX_MESSAGE_DELAY_MS) || 5000;
 
 const ResPath = process.env.RES_PATH || "res";
 const WsSubsFilename = ResPath + "/ws_subs.json";
 
 function assertValidChannelId(channelId) {
   if (!channelId) {
-    throw "channelId is empty";
+    throw new Error("channelId is empty");
   }
   if (!isString(channelId)) {
-    throw "channelId is not a string";
+    throw new Error("channelId is not a string");
   }
   if (channelId.length > MAX_CHANNEL_LENGTH) {
-    throw `channelId is longer than ${MAX_CHANNEL_LENGTH}`;
+    throw new Error(`channelId is longer than ${MAX_CHANNEL_LENGTH}`);
   }
 }
 
@@ -32,16 +43,82 @@ function assertValidChannelId(channelId) {
 
   const WS_PORT = process.env.WS_PORT || 7071;
 
-  const wss = new WebSocket.Server({ port: WS_PORT });
-  console.log("WebSocket server listening on http://localhost:%d/", WS_PORT);
-
   const wsClients = new Map();
   const channels = new Map();
   const globalMessageQueue = new Denque();
+  const accessKeyCache = new Map();
 
-  const validateSignature = async ({ signature, signedData }) => {
-    // TODO: Validate signature
-    return JSON.parse(signedData);
+  // console.log(
+  //   JSON.stringify(
+  //     await fetchAndCacheAccessKey(
+  //       accessKeyCache,
+  //       "alice.near",
+  //       "ed25519:3Fh3ZdiNn5kA5eNDNrgRmvt2bCuK4ggGEp44E6xACbLz",
+  //     ),
+  //   ),
+  // );
+
+  const wss = new WebSocketServer({ port: WS_PORT });
+  console.log("WebSocket server listening on http://localhost:%d/", WS_PORT);
+
+  const validateDataAndSignature = async ({ signature, serializedData }) => {
+    const data = JSON.parse(serializedData);
+    if (!data || typeof data !== "object") {
+      throw new Error("Invalid data format");
+    }
+    if (!data.metadata || typeof data.metadata !== "object") {
+      throw new Error("Missing metadata");
+    }
+    const { accountId, contractId, publicKey, timestampMs } = data.metadata;
+    if (!isValidAccountId(accountId)) {
+      throw new Error("Invalid accountId");
+    }
+    if (contractId !== null && !isValidAccountId(contractId)) {
+      throw new Error("Invalid contractId");
+    }
+    const currentTimestampMs = Date.now();
+    if (
+      !timestampMs ||
+      typeof timestampMs !== "number" ||
+      currentTimestampMs < timestampMs ||
+      currentTimestampMs - timestampMs > MAX_MESSAGE_DELAY_MS
+    ) {
+      throw new Error("Invalid timestamp");
+    }
+    verifySignature(publicKey, signature, serializedData);
+    data.publicKey = keyToString(keyFromString(publicKey));
+    if (contractId === null) {
+      // It's a full access key
+      if (isImplicitNearAccount(accountId)) {
+        const expectedPublicKey =
+          derivePublicKeyFromImplicitAccountId(publicKey);
+        if (data.publicKey === expectedPublicKey) {
+          // Don't check the key on the blockchain
+          return data;
+        }
+      }
+    }
+    const chainAccessKey = await fetchAndCacheAccessKey(
+      accessKeyCache,
+      accountId,
+      publicKey,
+    );
+    if (!chainAccessKey) {
+      throw new Error("Error fetching the access key");
+    }
+    if (chainAccessKey.error) {
+      throw new Error("The access key doesn't exist");
+    }
+    if (contractId) {
+      const expectedContractId =
+        chainAccessKey.permission?.FunctionCall?.receiver_id;
+      if (expectedContractId !== contractId) {
+        throw new Error("Access key contractId doesn't match");
+      }
+    } else if (chainAccessKey.permission !== "FullAccess") {
+      throw new Error("Access key is not full access");
+    }
+    return data;
   };
 
   const addGlobalMessage = (message) => {
@@ -50,65 +127,69 @@ function assertValidChannelId(channelId) {
 
   const validateClientChannel = (client, data, channel) => {
     if (!channel) {
-      throw "Channel doesn't exists";
+      throw new Error("Channel doesn't exists");
     }
     const clientChannel = client.channels.get(channel.channelId);
     if (!clientChannel) {
-      throw "Client hasn't joined the channel";
+      throw new Error("Client hasn't joined the channel");
     }
-    const { accountId, contractId, publicKey } = data;
+    const { accountId, contractId, publicKey } = data.metadata;
     if (clientChannel.accountId !== accountId) {
-      throw "Client joined with different accountId";
+      throw new Error("Client joined with different accountId");
     }
     if (clientChannel.contractId !== contractId) {
-      throw "Client joined with different contractId";
+      throw new Error("Client joined with different contractId");
     }
     if (clientChannel.publicKey !== publicKey) {
-      throw "Client joined with different publicKey";
+      throw new Error("Client joined with different publicKey");
     }
   };
 
   const addChannelMessage = (
     channel,
     action,
-    data,
+    message,
     clientIdentity,
-    metadata,
+    signedData,
   ) => {
-    const { accountId, contractId, publicKey } = clientIdentity;
-    const message = {
+    const { metadata, client } = clientIdentity;
+    const update = {
       action,
-      clientIdentity: { accountId, contractId, publicKey },
-      data,
-      timestamp: Date.now(),
+      clientIdentity: {
+        accountId: metadata.accountId,
+        contractId: metadata.contractId,
+        publicKey: metadata.publicKey,
+        clientId: client.clientId,
+      },
+      message,
+      timestampMs: Date.now(),
       nonce: channel.nonce++,
     };
     const channelId = channel.channelId;
-    addGlobalMessage(channelId, message.timestamp);
-    channel.messages.push({ message, metadata });
+    addGlobalMessage(channelId, update.timestampMs);
+    channel.updates.push({ update, signedData });
     channel.clients.values().forEach((ws) => {
       try {
         ws.send(
           JSON.stringify({
             type: "channel",
-            data: Object.assign({ channelId }, message),
+            data: Object.assign({ channelId }, update),
           }),
         );
       } catch (e) {
-        console.log("Failed to send message to ws", e);
+        console.log("Failed to send update to ws", e);
       }
     });
   };
 
-  const handleJoin = (ws, req, data, metadata) => {
-    const client = wsClients.get(ws);
-    const clientId = client.clientId;
+  const handleJoin = (ws, req, data, signedData) => {
+    const client = data.client;
     const channelId = data.channelId;
     assertValidChannelId(channelId);
     if (client.channels.has(channelId)) {
       throw new Error("Already joined the channel");
     }
-    const { accountId, contractId, publicKey } = data;
+    const { accountId, contractId, publicKey } = data.metadata;
     client.channels.set(channelId, {
       accountId,
       contractId,
@@ -118,48 +199,36 @@ function assertValidChannelId(channelId) {
       channels.set(channelId, {
         channelId,
         clients: new Map(),
-        messages: [],
+        updates: [],
         nonce: 1,
       });
     }
     const channel = channels.get(channelId);
-    // // Try to send the history. And your ID
-    // try {
-    //   ws.send(
-    //     JSON.stringify({
-    //       type: "history",
-    //       data: {
-    //         messages: channel.messages.slice(-MAX_HISTORY),
-    //       },
-    //     }),
-    //   );
-    // } catch (e) {
-    //   console.log("Failed to send past messages", e);
-    // }
-    channel.clients.set(clientId, ws);
-    addChannelMessage(channel, "connected", {}, data, metadata);
+    channel.clients.set(client.clientId, ws);
+    addChannelMessage(channel, "joined", data.message, data, signedData);
   };
 
-  const handleLeave = (ws, req, data, metadata) => {
-    // TODO
+  const handleLeave = (ws, req, data, signedData) => {
+    const client = data.client;
+    const channelId = data.channelId;
+    assertValidChannelId(channelId);
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel doesn't exist");
+    }
+    validateClientChannel(client, data, channel);
+    addChannelMessage(channel, "left", data.message, data, signedData);
+    client.channels.delete(channelId);
+    channel.clients.delete(client.clientId);
   };
 
-  const handleMessage = (ws, data, metadata) => {
-    const client = wsClients.get(ws);
-    const clientId = client.clientId;
+  const handleMessage = (ws, data, signedData) => {
+    const client = data.client;
     const channelId = data.channelId;
     assertValidChannelId(channelId);
     const channel = channels.get(channelId);
     validateClientChannel(client, data, channel);
-    addChannelMessage(
-      channel,
-      "message",
-      {
-        message: data.message,
-      },
-      data,
-      metadata,
-    );
+    addChannelMessage(channel, "message", data.message, data, signedData);
   };
 
   const handleDisconnect = (ws, clientId) => {
@@ -168,17 +237,44 @@ function assertValidChannelId(channelId) {
       const channel = channels.get(channelId);
       if (channel) {
         channel.clients.delete(clientId);
-        addChannelMessage(channel, "disconnected", {}, clientIdentity, null);
+        addChannelMessage(
+          channel,
+          "disconnected",
+          undefined,
+          Object.assign({ client }, clientIdentity),
+          null,
+        );
       }
     }
     wsClients.delete(ws);
   };
 
-  const handleHistory = (ws, data, metadata) => {
-    // TODO:
+  const handleHistory = (ws, data, signedData) => {
+    const client = data.client;
+    const channelId = data.channelId;
+    assertValidChannelId(channelId);
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel doesn't exist");
+    }
+    validateClientChannel(client, data, channel);
+    const updates = channel.updates.slice(-MAX_HISTORY);
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "history",
+          data: {
+            channelId,
+            history: updates.map(({ update }) => update),
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send history", e);
+    }
   };
 
-  const handleMembers = (ws, data, metadata) => {
+  const handleMembers = (ws, data, signedData) => {
     // TODO:
   };
 
@@ -199,31 +295,41 @@ function assertValidChannelId(channelId) {
 
     ws.on("message", async (dataString) => {
       try {
-        const metadata = JSON.parse(dataString);
-        const data = await validateSignature(metadata);
-        const { signature, signedData } = metadata;
+        const signedData = JSON.parse(dataString);
+        const data = await validateDataAndSignature(signedData);
+        data.client = wsClients.get(ws);
 
         switch (data.action) {
           case "join":
-            handleJoin(ws, req, data, metadata);
+            handleJoin(ws, req, data, signedData);
             break;
           case "leave":
-            handleLeave(ws, req, data, metadata);
+            handleLeave(ws, req, data, signedData);
             break;
           case "message":
-            handleMessage(ws, data, metadata);
+            handleMessage(ws, data, signedData);
             break;
           case "history":
-            handleHistory(ws, data, metadata);
+            handleHistory(ws, data, signedData);
             break;
           case "members":
-            handleMembers(ws, data, metadata);
+            handleMembers(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");
         }
       } catch (e) {
-        console.log("Bad message", e);
+        console.log(e);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              error: e.message || "Unknown error",
+            }),
+          );
+        } catch (e) {
+          console.log("Failed to send error message", e);
+        }
       }
     });
 
