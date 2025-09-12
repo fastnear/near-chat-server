@@ -14,6 +14,7 @@ import {
   fetchAndCacheAccessKey,
 } from "./near.js";
 import { WebSocketServer } from "ws";
+import { loadChannelsConfig, getAvailableChannels, canUserAccessChannel, getChannelConfig } from "./channels-service.js";
 
 const MAX_HISTORY = 1000;
 const MAX_CHANNEL_LENGTH = 64;
@@ -47,6 +48,8 @@ function assertValidChannelId(channelId) {
   const channels = new Map();
   const globalMessageQueue = new Denque();
   const accessKeyCache = new Map();
+
+  loadChannelsConfig();
 
   // console.log(
   //   JSON.stringify(
@@ -182,14 +185,25 @@ function assertValidChannelId(channelId) {
     });
   };
 
-  const handleJoin = (ws, req, data, signedData) => {
+  const handleJoin = async (ws, req, data, signedData) => {
     const client = data.client;
     const channelId = data.channelId;
     assertValidChannelId(channelId);
     if (client.channels.has(channelId)) {
       throw new Error("Already joined the channel");
     }
+    
     const { accountId, contractId, publicKey } = data.metadata;
+    
+    // Check if channel exists in config - if yes, validate access
+    const channelConfig = getChannelConfig(channelId);
+    if (channelConfig) {
+      const hasAccess = await canUserAccessChannel(accountId, channelId);
+      if (!hasAccess) {
+        throw new Error("Access denied to this channel");
+      }
+    }
+    // If channel doesn't exist in config, allow free creation
     client.channels.set(channelId, {
       accountId,
       contractId,
@@ -274,6 +288,23 @@ function assertValidChannelId(channelId) {
     }
   };
 
+  const handleAvailableChannels = async (ws, data, signedData) => {
+    const { accountId } = data.metadata;
+    try {
+      const availableChannels = await getAvailableChannels(accountId);
+      ws.send(
+        JSON.stringify({
+          type: "available_channels",
+          data: {
+            channels: availableChannels,
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send available channels", e);
+    }
+  };
+
   const handleMembers = (ws, data, signedData) => {
     // TODO:
   };
@@ -301,7 +332,7 @@ function assertValidChannelId(channelId) {
 
         switch (data.action) {
           case "join":
-            handleJoin(ws, req, data, signedData);
+            await handleJoin(ws, req, data, signedData);
             break;
           case "leave":
             handleLeave(ws, req, data, signedData);
@@ -314,6 +345,9 @@ function assertValidChannelId(channelId) {
             break;
           case "members":
             handleMembers(ws, data, signedData);
+            break;
+          case "available_channels":
+            handleAvailableChannels(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");
