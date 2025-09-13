@@ -34,7 +34,7 @@ const checkAccountAge = async (accountId, beforeDate) => {
       account_id: accountId,
     });
     
-    const createdAt = new Date(account.created.timestamp_nanosec / 1000000);
+    const createdAt = new Date(account.block_height <= 170000000);
     const cutoffDate = new Date(beforeDate);
     
     return createdAt < cutoffDate;

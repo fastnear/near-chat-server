@@ -15,6 +15,8 @@ import {
 } from "./near.js";
 import { WebSocketServer } from "ws";
 import { loadChannelsConfig, getAvailableChannels, canUserAccessChannel, getChannelConfig } from "./channels-service.js";
+import { loadBotsConfig, isValidBot, getBotsForMessage } from "./bots-service.js";
+import BotManager from "./bot-manager.js";
 
 const MAX_HISTORY = 1000;
 const MAX_CHANNEL_LENGTH = 64;
@@ -49,7 +51,11 @@ function assertValidChannelId(channelId) {
   const globalMessageQueue = new Denque();
   const accessKeyCache = new Map();
 
+  loadBotsConfig();
   loadChannelsConfig();
+
+
+  const botManager = new BotManager();
 
   // console.log(
   //   JSON.stringify(
@@ -63,6 +69,12 @@ function assertValidChannelId(channelId) {
 
   const wss = new WebSocketServer({ port: WS_PORT });
   console.log("WebSocket server listening on http://localhost:%d/", WS_PORT);
+
+  // Start all bots after server is ready
+  setTimeout(() => {
+    console.log("🤖 Starting all enabled bots...");
+    botManager.startAllBots();
+  }, 2000);
 
   const validateDataAndSignature = async ({ signature, serializedData }) => {
     const data = JSON.parse(serializedData);
@@ -116,6 +128,8 @@ function assertValidChannelId(channelId) {
       const expectedContractId =
         chainAccessKey.permission?.FunctionCall?.receiver_id;
       if (expectedContractId !== contractId) {
+        console.log("Expected contractId:", expectedContractId);
+        console.log("Provided contractId:", contractId);  
         throw new Error("Access key contractId doesn't match");
       }
     } else if (chainAccessKey.permission !== "FullAccess") {
@@ -156,6 +170,10 @@ function assertValidChannelId(channelId) {
     signedData,
   ) => {
     const { metadata, client } = clientIdentity;
+    if (!metadata || !client) {
+      return console.error("Invalid client identity");
+    }
+
     const update = {
       action,
       clientIdentity: {
@@ -216,6 +234,11 @@ function assertValidChannelId(channelId) {
         updates: [],
         nonce: 1,
       });
+      
+      // Start bots for this channel if it's newly created
+      setTimeout(() => {
+        botManager.startBotsForChannel(channelId);
+      }, 1000);
     }
     const channel = channels.get(channelId);
     channel.clients.set(client.clientId, ws);
@@ -242,6 +265,20 @@ function assertValidChannelId(channelId) {
     assertValidChannelId(channelId);
     const channel = channels.get(channelId);
     validateClientChannel(client, data, channel);
+    
+    // Validate replyTo if present
+    if (data.message && typeof data.message === 'object' && data.message.replyTo) {
+      const replyToNonce = data.message.replyTo;
+      if (typeof replyToNonce !== 'number' || replyToNonce < 1) {
+        throw new Error("Invalid replyTo nonce");
+      }
+      // Check if replied message exists in channel history
+      const originalMessage = channel.updates.find(({ update }) => update.nonce === replyToNonce);
+      if (!originalMessage) {
+        throw new Error("Replied message not found");
+      }
+    }
+    
     addChannelMessage(channel, "message", data.message, data, signedData);
   };
 
@@ -291,7 +328,7 @@ function assertValidChannelId(channelId) {
   const handleAvailableChannels = async (ws, data, signedData) => {
     const { accountId } = data.metadata;
     try {
-      const availableChannels = await getAvailableChannels(accountId);
+      const availableChannels = await getAvailableChannels(accountId, channels, wsClients);
       ws.send(
         JSON.stringify({
           type: "available_channels",
@@ -305,8 +342,80 @@ function assertValidChannelId(channelId) {
     }
   };
 
+  const handleRegisterBot = (ws, data, signedData) => {
+    const { accountId } = data.metadata;
+    const client = data.client;
+    
+    if (!isValidBot(accountId)) {
+      throw new Error("Bot not authorized");
+    }
+    
+    client.isBot = true;
+    client.botAccountId = accountId;
+    
+    console.log(`Bot registered: ${accountId}`);
+    
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "bot_registered",
+          data: {
+            success: true,
+            botId: accountId,
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send bot registration confirmation", e);
+    }
+  };
+
   const handleMembers = (ws, data, signedData) => {
-    // TODO:
+    const client = data.client;
+    const channelId = data.channelId;
+    assertValidChannelId(channelId);
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel doesn't exist");
+    }
+    validateClientChannel(client, data, channel);
+    
+    const members = [];
+    
+    // Get all clients in the channel
+    for (const [clientId, ws] of channel.clients) {
+      const clientData = wsClients.get(ws);
+      if (clientData) {
+        // Get client identity from their channel membership
+        const clientChannel = clientData.channels.get(channelId);
+        if (clientChannel) {
+          members.push({
+            clientId: clientData.clientId,
+            accountId: clientChannel.accountId,
+            isBot: clientData.isBot || false,
+            botAccountId: clientData.botAccountId || null,
+            joinedAt: null // Could add timestamp if needed
+          });
+        }
+      }
+    }
+    
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "members",
+          data: {
+            channelId,
+            members: members,
+            totalCount: members.length,
+            humanCount: members.filter(m => !m.isBot).length,
+            botCount: members.filter(m => m.isBot).length,
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send members list", e);
+    }
   };
 
   wss.on("connection", (ws, req) => {
@@ -317,6 +426,7 @@ function assertValidChannelId(channelId) {
     wsClients.set(ws, {
       clientId,
       channels: new Map(),
+      isBot: false,
     });
 
     ws.on("close", () => {
@@ -331,6 +441,9 @@ function assertValidChannelId(channelId) {
         data.client = wsClients.get(ws);
 
         switch (data.action) {
+          case "register_bot":
+            handleRegisterBot(ws, data, signedData);
+            break;
           case "join":
             await handleJoin(ws, req, data, signedData);
             break;
@@ -377,5 +490,18 @@ function assertValidChannelId(channelId) {
     } catch (e) {
       console.log("Failed to send welcome message", e);
     }
+  });
+
+  // Graceful shutdown for bots
+  process.on("SIGINT", () => {
+    console.log("🛑 Shutting down server...");
+    botManager.stopAllBots();
+    process.exit(0);
+  });
+
+  process.on("SIGTERM", () => {
+    console.log("🛑 Shutting down server...");
+    botManager.stopAllBots();
+    process.exit(0);
   });
 })();

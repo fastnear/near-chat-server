@@ -1,0 +1,24 @@
+{
+  "tip-bot": {
+    "name": "Tip Bot",
+    "description": "Handles tipping functionality with NEAR Intents",
+    "accountId": "zavodil.near", 
+    "channels": ["general", "developers"],
+    "filters": {
+      "commands": ["/tip"],
+      "mentions": ["@tipbot", "@tip"]
+    },
+    "enabled": true
+  },
+  "gpt-bot": {
+    "name": "GPT Assistant",
+    "description": "AI assistant powered by OpenAI",
+    "accountId": "zavodil.near", 
+    "channels": ["general", "developers"],
+    "filters": {
+      "commands": ["/ask", "/gpt"],
+      "mentions": ["@gpt", "@chatgpt", "@ai"]
+    },
+    "enabled": true
+  }
+}

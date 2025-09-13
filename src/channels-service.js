@@ -29,7 +29,7 @@ export const getAllChannelConfigs = () => {
   return channelsConfig;
 };
 
-export const getAvailableChannels = async (accountId) => {
+export const getAvailableChannels = async (accountId, channels = null, wsClients = null) => {
   const availableChannels = {};
   
   for (const [channelId, config] of Object.entries(channelsConfig)) {
@@ -37,11 +37,28 @@ export const getAvailableChannels = async (accountId) => {
       const hasAccess = await evaluateAllRules(accountId, config.rules);
       
       if (hasAccess) {
+        // Get member and bot counts from active channels
+        const channelClients = channels?.get(channelId)?.clients || new Map();
+        let memberCount = 0;
+        let botsCount = 0;
+        
+        // Count members vs bots based on wsClients data
+        for (const [clientId, ws] of channelClients) {
+          const clientData = wsClients?.get(ws);
+          if (clientData?.isBot) {
+            botsCount++;
+          } else {
+            memberCount++;
+          }
+        }
+        
         availableChannels[channelId] = {
           name: config.name,
           description: config.description,
           isPublic: config.isPublic,
           defaultToken: config.defaultToken || "near",
+          memberCount: memberCount,
+          botsCount: botsCount,
         };
       }
     } catch (error) {

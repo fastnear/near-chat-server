@@ -2,6 +2,8 @@ import { fromBase58, toBase58, isString } from "./utils.js";
 import { ed25519 } from "@noble/curves/ed25519";
 import { sha256 } from "@noble/hashes/sha2";
 import { hexToBytes } from "@noble/hashes/utils";
+import { KeyPair } from '@near-js/crypto';
+import { baseEncode } from '@near-js/utils';
 
 const MIN_ACCOUNT_ID_LEN = 2;
 const MAX_ACCOUNT_ID_LEN = 64;
@@ -140,6 +142,32 @@ const fetchAndCacheAccessKey = async (accessKeyCache, accountId, publicKey) => {
   return null;
 };
 
+const getKeyPairFromPrivateKey = (privateKey) => {
+    let keyPair = KeyPair.fromString(privateKey);
+    return keyPair;
+}
+
+const getPublicKeyFromKeyPair = (keyPair) => {      
+      return keyPair.getPublicKey().toString()
+}
+
+const signMessage = async (message, keyPair) => {
+    if (!keyPair) {
+      throw new Error('KeyPair not initialized');
+    }
+
+    try {
+      const messageBytes = new TextEncoder().encode(message);
+      const hash = await crypto.subtle.digest('SHA-256', messageBytes);
+      const signature = keyPair.sign(new Uint8Array(hash));
+      const signatureBase58 = `ed25519:${baseEncode(signature.signature)}`;
+      return signatureBase58;
+    } catch (error) {
+      console.error('Signing error:', error);
+      throw error;
+    }
+  }
+
 export {
   isValidAccountId,
   keyToString,
@@ -148,4 +176,7 @@ export {
   verifySignature,
   derivePublicKeyFromImplicitAccountId,
   fetchAndCacheAccessKey,
+  getPublicKeyFromKeyPair,
+  getKeyPairFromPrivateKey,
+  signMessage
 };
