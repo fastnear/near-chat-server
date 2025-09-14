@@ -26,6 +26,11 @@ const MAX_MESSAGE_DELAY_MS =
 
 const ResPath = process.env.RES_PATH || "res";
 const WsSubsFilename = ResPath + "/ws_subs.json";
+const StateFilename = ResPath + "/server-state.json";
+
+// Global variables for state management
+let channels;
+let pendingIntents;
 
 function assertValidChannelId(channelId) {
   if (!channelId) {
@@ -39,18 +44,100 @@ function assertValidChannelId(channelId) {
   }
 }
 
+function saveState() {
+  try {
+    // Convert channels Map to serializable object
+    const channelsObj = {};
+    for (const [channelId, channelData] of channels.entries()) {
+      // Convert updates array to serializable messages (without signedData)
+      const messages = (channelData.updates || []).map(({ update }) => update);
+
+      channelsObj[channelId] = {
+        channelId: channelData.channelId,
+        nonce: channelData.nonce,
+        messages: messages,
+        createdBy: channelData.createdBy,
+        // Skip non-serializable fields like 'clients' Map
+      };
+    }
+
+    const state = {
+      timestamp: Date.now(),
+      channels: channelsObj
+    };
+
+    saveJson(state, StateFilename);
+    console.log(`✅ State saved to ${StateFilename}`);
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to save state:", error);
+    return false;
+  }
+}
+
+function loadState() {
+  try {
+    if (!fs.existsSync(StateFilename)) {
+      console.log("No saved state found, starting fresh");
+      return null;
+    }
+
+    const state = loadJson(StateFilename);
+    if (!state || !state.channels) {
+      console.log("Invalid state file, starting fresh");
+      return null;
+    }
+
+    const channelCount = Object.keys(state.channels).length;
+    const totalMessages = Object.values(state.channels)
+      .reduce((sum, channel) => sum + (channel.messages?.length || 0), 0);
+
+    console.log(`✅ Loaded state: ${channelCount} channels, ${totalMessages} messages (saved at ${new Date(state.timestamp).toLocaleString()})`);
+    return state;
+  } catch (error) {
+    console.error("❌ Failed to load state:", error);
+    console.log("Starting with fresh state");
+    return null;
+  }
+}
+
 (async () => {
   if (!fs.existsSync(ResPath)) {
     fs.mkdirSync(ResPath);
   }
 
+  // Load saved state if exists
+  const savedState = loadState();
+
   const WS_PORT = process.env.WS_PORT || 7071;
 
   const wsClients = new Map();
-  const channels = new Map();
   const globalMessageQueue = new Denque();
   const accessKeyCache = new Map();
-  const pendingIntents = new Map(); // intentId -> intent data
+
+  // Initialize global state variables
+  channels = new Map();
+  pendingIntents = new Map(); // intentId -> intent data
+
+  // Restore saved state if available
+  if (savedState && savedState.channels) {
+    for (const [channelId, channelData] of Object.entries(savedState.channels)) {
+      // Convert saved messages back to updates format (without signedData)
+      const updates = (channelData.messages || []).map(update => ({
+        update,
+        signedData: null // We don't save signedData, set to null
+      }));
+
+      // Restore channel with proper structure
+      channels.set(channelId, {
+        channelId: channelData.channelId,
+        nonce: channelData.nonce || 1,
+        createdBy: channelData.createdBy,
+        clients: new Map(), // Will be populated as clients reconnect
+        updates: updates // Restored from saved messages
+      });
+    }
+  }
 
   // Cleanup expired intents (5 minute timeout)
   const cleanupExpiredIntents = () => {
@@ -137,7 +224,7 @@ function assertValidChannelId(channelId) {
               amount: pendingIntent.humanAmount || pendingIntent.amount,
               token: pendingIntent.token,
               transactionHash: transactionHash,
-              message: `✅ ${pendingIntent.requester} tipped ${pendingIntent.recipient} ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.token}`
+              message: `✅ ${pendingIntent.requester} tipped ${pendingIntent.recipient} ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.tokenSymbol}`
             }
           });
           
@@ -154,7 +241,7 @@ function assertValidChannelId(channelId) {
                 clientId: "tip-bot",
               },
               message: {
-                text: `✅ Tip successful! @${pendingIntent.requester} sent ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.token} to ${pendingIntent.recipient}. View transaction: https://nearblocks.io/txns/${transactionHash}`,
+                text: `✅ Tip successful! @${pendingIntent.requester} sent ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.tokenSymbol} to ${pendingIntent.recipient}. View transaction: https://nearblocks.io/txns/${transactionHash}`,
                 replyTo: pendingIntent.replyToNonce
               },
               timestampMs: Date.now(),
@@ -251,7 +338,62 @@ function assertValidChannelId(channelId) {
     setTimeout(checkStatus, 200);
   };
 
-  // Ready for intent publishing via solver relay
+  // Function to check if user can delete message
+  const canUserDeleteMessage = (messageAuthor, currentUser, channelId) => {
+    // User can delete their own messages
+    if (messageAuthor === currentUser) {
+      return true;
+    }
+    
+    // Check if user is admin of the channel
+    const channelConfig = getChannelConfig(channelId);
+    if (channelConfig?.adminUsers?.includes(currentUser)) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  const handleDeleteMessage = async (ws, data, signedData) => {
+    const { messageNonce, channelId } = data;
+    const { accountId } = data.metadata;
+    
+    console.log(`Delete message request: ${accountId} wants to delete nonce ${messageNonce} in ${channelId}`);
+    
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+    
+    // Find the message to delete
+    const messageIndex = channel.updates.findIndex(item => item.update.nonce === messageNonce);
+    if (messageIndex === -1) {
+      throw new Error("Message not found");
+    }
+    
+    const messageToDelete = channel.updates[messageIndex];
+    const messageAuthor = messageToDelete.update.clientIdentity.accountId;
+    
+    // Check permissions
+    if (!canUserDeleteMessage(messageAuthor, accountId, channelId)) {
+      throw new Error("Permission denied: cannot delete this message");
+    }
+    
+    // Remove message from updates
+    channel.updates.splice(messageIndex, 1);
+    
+    // Broadcast deletion to all channel members
+    broadcastToChannel(channelId, {
+      type: "message_deleted",
+      data: {
+        messageNonce,
+        channelId,
+        deletedBy: accountId
+      }
+    });
+    
+    console.log(`Message ${messageNonce} deleted by ${accountId}`);
+  };
 
   const botManager = new BotManager();
 
@@ -400,12 +542,25 @@ function assertValidChannelId(channelId) {
     const channelId = channel.channelId;
     addGlobalMessage(channelId, update.timestampMs);
     channel.updates.push({ update, signedData });
-    channel.clients.values().forEach((ws) => {
+    channel.clients.forEach((ws, clientWs) => {
       try {
+        const client = wsClients.get(clientWs);
+        const currentUserAccountId = client?.accountId;
+        
+        // Add canDelete field based on user permissions
+        const messageWithPermissions = {
+          ...update,
+          canDelete: canUserDeleteMessage(
+            update.clientIdentity.accountId, 
+            currentUserAccountId, 
+            channelId
+          )
+        };
+        
         ws.send(
           JSON.stringify({
             type: "channel",
-            data: Object.assign({ channelId }, update),
+            data: Object.assign({ channelId }, messageWithPermissions),
           }),
         );
       } catch (e) {
@@ -526,13 +681,25 @@ function assertValidChannelId(channelId) {
     }
     validateClientChannel(client, data, channel);
     const updates = channel.updates.slice(-MAX_HISTORY);
+    
+    // Get current user for permissions
+    const wsClient = wsClients.get(ws);
+    const currentUserAccountId = wsClient?.accountId;
+    
     try {
       ws.send(
         JSON.stringify({
           type: "history",
           data: {
             channelId,
-            history: updates.map(({ update }) => update),
+            history: updates.map(({ update }) => ({
+              ...update,
+              canDelete: canUserDeleteMessage(
+                update.clientIdentity.accountId,
+                currentUserAccountId,
+                channelId
+              )
+            })),
           },
         }),
       );
@@ -829,7 +996,8 @@ function assertValidChannelId(channelId) {
     // Get channel config for token info
     const channelConfig = getChannelConfig(channelId);
     const defaultToken = channelConfig?.defaultToken || "wrap.near";
-    
+    const tokenSymbol = channelConfig?.tokenSymbol || defaultToken;
+
     // Store pending intent
     const intentData = {
       intentId,
@@ -838,6 +1006,7 @@ function assertValidChannelId(channelId) {
       amount, // blockchain amount with decimals
       humanAmount, // human readable amount for UI
       token: defaultToken,
+      tokenSymbol,
       originalMessage,
       requester,
       replyToNonce,
@@ -907,6 +1076,45 @@ function assertValidChannelId(channelId) {
     }
   };
 
+  const handleDepositRequest = async (ws, data, signedData) => {
+    const { channelId, targetAccountId, token, requiredAmount, decimals, tokenSymbol } = data;
+
+    console.log(`Deposit request for ${targetAccountId}: ${requiredAmount} ${token} in ${channelId}`);
+
+    // Find the target user's WebSocket in the channel
+    let targetWs = null;
+    for (const [clientWs, client] of wsClients.entries()) {
+      const clientChannel = client.channels.get(channelId);
+      if (clientChannel && clientChannel.accountId === targetAccountId) {
+        targetWs = clientWs;
+        break;
+      }
+    }
+
+    if (!targetWs) {
+      console.log(`Target user ${targetAccountId} not found in channel ${channelId}`);
+      return;
+    }
+
+    // Send deposit UI message only to the target user
+    try {
+      targetWs.send(JSON.stringify({
+        type: "deposit_ui",
+        data: {
+          channelId,
+          token,
+          requiredAmount, // Human readable amount
+          decimals,
+          tokenSymbol
+        }
+      }));
+
+      console.log(`Sent deposit UI to ${targetAccountId}`);
+    } catch (e) {
+      console.error("Failed to send deposit UI:", e);
+    }
+  };
+
   wss.on("connection", (ws, req) => {
     const clientId = uuidv4();
     console.log("WS Connection open", clientId);
@@ -942,6 +1150,9 @@ function assertValidChannelId(channelId) {
           case "message":
             handleMessage(ws, data, signedData);
             break;
+          case "delete_message":
+            await handleDeleteMessage(ws, data, signedData);
+            break;
           case "history":
             handleHistory(ws, data, signedData);
             break;
@@ -956,6 +1167,9 @@ function assertValidChannelId(channelId) {
             break;
           case "request_tip_intent":
             await handleRequestTipIntent(ws, data, signedData);
+            break;
+          case "deposit_request":
+            await handleDepositRequest(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");
@@ -987,15 +1201,19 @@ function assertValidChannelId(channelId) {
     }
   });
 
-  // Graceful shutdown for bots
+  // Graceful shutdown with state saving
   process.on("SIGINT", () => {
     console.log("🛑 Shutting down server...");
+    console.log("💾 Saving state...");
+    saveState();
     botManager.stopAllBots();
     process.exit(0);
   });
 
   process.on("SIGTERM", () => {
     console.log("🛑 Shutting down server...");
+    console.log("💾 Saving state...");
+    saveState();
     botManager.stopAllBots();
     process.exit(0);
   });

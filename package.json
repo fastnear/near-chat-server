@@ -18,7 +18,8 @@
   },
   "scripts": {
     "start": "node src/index",
-    "dev": "nodemon -r dotenv/config src/index"
+    "dev": "nodemon -r dotenv/config src/index",
+    "restart": "node scripts/safe-restart.js"
   },
   "devDependencies": {
     "nodemon": "^2.0.6"

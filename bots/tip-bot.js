@@ -159,7 +159,7 @@ class TipBot {
 
   requestTipIntent(channelId, recipient, amount, originalMessage, requester, replyToNonce = null, humanAmount = null) {
     const intentId = `tip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     this.sendMessage("request_tip_intent", {
       channelId,
       intentId,
@@ -170,8 +170,22 @@ class TipBot {
       requester,
       replyToNonce
     });
-    
+
     return intentId;
+  }
+
+  sendDepositRequest(channelId, targetAccountId, requiredAmount, token, channelConfig) {
+    const decimals = channelConfig?.tokenDecimals || 24;
+    const tokenSymbol = channelConfig?.tokenSymbol || token;
+
+    this.sendMessage("deposit_request", {
+      channelId,
+      targetAccountId, // Only this user should see the deposit UI
+      token,
+      requiredAmount: requiredAmount.toString(), // Human readable amount
+      decimals,
+      tokenSymbol
+    });
   }
 
   handleMessage(message) {
@@ -329,14 +343,16 @@ class TipBot {
       const hasBalance = await this.checkBalance(senderAccountId, defaultToken, requiredAmount);
       
       if (!hasBalance) {
+        // Send public message about insufficient balance
         this.sendTipMessage(
           channelId,
-          `❌ Insufficient balance on intents.near\n` +
-          `💰 Required: ${amount} ${defaultToken}\n` +
-          `🏦 Deposit funds at: https://near-intents.org/deposit\n` +
-          `📝 Account: ${senderAccountId}`,
+          `❌ ${senderAccountId} has insufficient balance for this tip\n` +
+          `💰 Required: ${amount} ${defaultToken}`,
           currentMessageNonce
         );
+
+        // Send private deposit UI message to sender only
+        this.sendDepositRequest(channelId, senderAccountId, amount, defaultToken, channelConfig);
         return;
       }
       

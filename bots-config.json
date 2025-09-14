@@ -4,7 +4,7 @@
     "displayName": "@tipbot",
     "description": "Handles tipping functionality with NEAR Intents",
     "accountId": "zavodil.near", 
-    "channels": ["general", "developers"],
+    "channels": ["general", "developers", "jambo"],
     "filters": {
       "commands": ["/tip"],
       "mentions": ["@tipbot", "@tip"]

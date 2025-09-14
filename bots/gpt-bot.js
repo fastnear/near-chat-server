@@ -110,6 +110,17 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
     };
     
     this.sendMessage("message", messageData);
+    
+    // Return a promise that resolves with the message nonce
+    // We'll use timestamp as approximate nonce for tracking
+    return Promise.resolve(Date.now());
+  }
+
+  deleteMessage(channelId, messageNonce) {
+    this.sendMessage("delete_message", {
+      channelId,
+      messageNonce
+    });
   }
 
   async callOpenAI(prompt) {
@@ -273,14 +284,40 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
         return;
       }
       
-      this.sendGPTMessage(channelId, `🤖 Let me think about that...`, currentMessageNonce);
+      // Send thinking message and save reference for later deletion
+      const thinkingMessage = `🤖 Let me think about that...`;
+      this.sendGPTMessage(channelId, thinkingMessage, currentMessageNonce);
       
       const response = await this.callOpenAI(question);
+      
+      // Send real response
       this.sendGPTMessage(
         channelId,
         `🤖 **@${sender.accountId}** ${response}`,
         currentMessageNonce
       );
+      
+      // Delete the thinking message by finding it in message history
+      setTimeout(() => {
+        this.deleteThinkingMessage(channelId, thinkingMessage);
+      }, 1000); // Wait 1 second to ensure message is processed
+    }
+  }
+
+  deleteThinkingMessage(channelId, thinkingText) {
+    // Find the thinking message in our message history
+    const channelHistory = this.messageHistory.get(channelId) || [];
+    const thinkingMessage = channelHistory
+      .slice(-5) // Look at last 5 messages only
+      .reverse() // Start from most recent
+      .find(msg => 
+        msg.sender.accountId === BOT_ACCOUNT_ID && 
+        (typeof msg.message === 'string' ? msg.message : msg.message.text || '').includes('Let me think about that')
+      );
+    
+    if (thinkingMessage) {
+      console.log(`Deleting thinking message with nonce: ${thinkingMessage.nonce}`);
+      this.deleteMessage(channelId, thinkingMessage.nonce);
     }
   }
 }

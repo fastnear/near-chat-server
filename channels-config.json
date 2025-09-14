@@ -5,7 +5,9 @@
     "isPublic": true,
     "rules": [],
     "defaultToken": "wrap.near",
-    "tokenDecimals": 24
+    "tokenSymbol": "WNEAR",
+    "tokenDecimals": 24,
+    "adminUsers": ["vadim.near", "zavodil.near"]
   },
   "og": {
     "name": "OG Members", 
@@ -15,6 +17,7 @@
       { "type": "account_age", "before": "2022-01-01" }
     ],
     "defaultToken": "wrap.near",
+    "tokenSymbol": "WNEAR",
     "tokenDecimals": 24
   },
   "whales": {
@@ -25,16 +28,18 @@
       { "type": "near_balance", "min": 100 }
     ],
     "defaultToken": "wrap.near",
+    "tokenSymbol": "WNEAR",
     "tokenDecimals": 24
   },
-  "jumbo": {
-    "name": "JUMBO Holders",
-    "description": "For JUMBO token holders with 10k+ tokens",
+  "jambo": {
+    "name": "JAMBO Holders",
+    "description": "For JAMBO token holders with 10k+ tokens",
     "isPublic": false,
     "rules": [
-      { "type": "ft_balance", "contract": "jambo-1679.meme-cooking.near", "min": 10000 }
+      { "type": "ft_balance", "contract": "jambo-1679.meme-cooking.near", "min": 1 }
     ],
     "defaultToken": "jambo-1679.meme-cooking.near",
+    "tokenSymbol": "JAMBO",
     "tokenDecimals": 18
   },
   "developers": {
@@ -43,6 +48,7 @@
     "isPublic": false,
     "rules": [],
     "defaultToken": "wrap.near",
+    "tokenSymbol": "WNEAR",
     "tokenDecimals": 24
   },
   "memecoins": {
@@ -50,7 +56,8 @@
     "description": "Memecoin enthusiasts",
     "isPublic": false,
     "rules": [],
-    "defaultToken": "wrap.near",
+    "defaultToken": "wrap.near",    
+    "tokenSymbol": "WNEAR",
     "tokenDecimals": 24
   },
   "fastnear": {
@@ -63,6 +70,8 @@
         "accounts": ["vadim.near", "mob.near", "mike.near"] 
       }
     ],
-    "defaultToken": "near"
+    "defaultToken": "wrap.near",    
+    "tokenSymbol": "WNEAR",
+    "tokenDecimals": 24
   }
 }
