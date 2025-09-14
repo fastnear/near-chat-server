@@ -17,10 +17,11 @@ const MAX_TOKENS = parseInt(process.env.OPENAI_MAX_TOKENS) || 150;
 class GPTBot {
   constructor() {
     loadBotsConfig();
-    this.config = getBotConfig("tip-bot");
+    this.config = getBotConfig("gpt-bot");
     this.ws = null;
     this.connected = false;
     this.joinedChannels = new Set();
+    this.messageHistory = new Map(); // channelId -> messages
   }
 
   connect() {
@@ -82,8 +83,9 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
 
   async registerBot() {
     await this.sendMessage("register_bot", {
+      botId: "gpt-bot",
       botInfo: {
-        name: "GPT Assistant",
+        name: "GPT Assistant", 
         description: "AI assistant powered by OpenAI",
       },
     });
@@ -98,11 +100,16 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
     });
   }
 
-  sendGPTMessage(channelId, message) {
-    this.sendMessage("message", {
+  sendGPTMessage(channelId, message, replyToNonce = null) {
+    const messageData = {
       channelId,
-      message,
-    });
+      message: replyToNonce ? {
+        text: message,
+        replyTo: replyToNonce
+      } : message,
+    };
+    
+    this.sendMessage("message", messageData);
   }
 
   async callOpenAI(prompt) {
@@ -169,7 +176,7 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
   }
 
   handleChannelMessage(data) {
-    const { action, message, channelId, clientIdentity } = data;
+    const { action, message, channelId, clientIdentity, nonce } = data;
     
     if (action === "joined" && clientIdentity.accountId === BOT_ACCOUNT_ID) {
       this.joinedChannels.add(channelId);
@@ -177,17 +184,60 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
       return;
     }
 
+    // Store message in history
+    if (action === "message" && message && nonce) {
+      if (!this.messageHistory.has(channelId)) {
+        this.messageHistory.set(channelId, []);
+      }
+      this.messageHistory.get(channelId).push({
+        nonce,
+        message,
+        sender: clientIdentity,
+        timestamp: Date.now()
+      });
+      
+      // Keep only last 100 messages per channel
+      if (this.messageHistory.get(channelId).length > 100) {
+        this.messageHistory.get(channelId).shift();
+      }
+    }
+
     // Ignore own messages
     if (clientIdentity.accountId === BOT_ACCOUNT_ID) return;
 
     // Handle GPT commands and mentions
     if (action === "message" && message) {
-      this.processGPTCommand(channelId, message, clientIdentity);
+      this.processGPTCommand(channelId, message, clientIdentity, nonce);
     }
   }
 
-  async processGPTCommand(channelId, message, sender) {
-    const lowerMessage = message.toLowerCase().trim();
+  async processGPTCommand(channelId, message, sender, currentMessageNonce) {
+    // Check if message is a reply
+    if (typeof message === 'object' && message.replyTo && message.text) {
+      // Find the original message being replied to
+      const channelHistory = this.messageHistory.get(channelId) || [];
+      const originalMessage = channelHistory.find(msg => msg.nonce === message.replyTo);
+      
+      // Check if replying to this bot's message - auto-respond
+      if (originalMessage && originalMessage.sender.accountId === BOT_ACCOUNT_ID) {
+        console.log(`Reply to GPT Bot from ${sender.accountId}: ${message.text}`);
+        
+        const response = await this.callOpenAI(message.text);
+        this.sendGPTMessage(
+          channelId,
+          `🤖 **GPT Response to ${sender.accountId}:**\n\n${response}`,
+          currentMessageNonce
+        );
+        return;
+      }
+      
+      // For other replies, process normally with the text
+      message = message.text;
+    }
+    
+    const lowerMessage = (typeof message === 'string' ? message : '').toLowerCase().trim();
+    
+    if (!lowerMessage) return;
     
     // Check for GPT commands: /ask <question>, /gpt <question>
     const askMatch = message.match(/^\/(?:ask|gpt)\s+(.+)$/i);
@@ -196,12 +246,13 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
       const question = askMatch[1].trim();
       console.log(`GPT command from ${sender.accountId}: ${question}`);
       
-      this.sendGPTMessage(channelId, `🤖 Processing your question: "${question}"...`);
+      this.sendGPTMessage(channelId, `🤖 Processing your question: "${question}"...`, currentMessageNonce);
       
       const response = await this.callOpenAI(question);
       this.sendGPTMessage(
         channelId,
-        `🤖 **GPT Response to ${sender.accountId}:**\n\n${response}`
+        `🤖 **GPT Response to ${sender.accountId}:**\n\n${response}`,
+        currentMessageNonce
       );
       return;
     }
@@ -216,17 +267,19 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
       if (question.length < 3) {
         this.sendGPTMessage(
           channelId,
-          `🤖 Hi ${sender.accountId}! Ask me a question using "/ask <your question>" or mention me with @gpt followed by your question.`
+          `🤖 Hi ${sender.accountId}! Ask me a question using "/ask <your question>" or mention me with @gpt followed by your question.`,
+          currentMessageNonce
         );
         return;
       }
       
-      this.sendGPTMessage(channelId, `🤖 Let me think about that...`);
+      this.sendGPTMessage(channelId, `🤖 Let me think about that...`, currentMessageNonce);
       
       const response = await this.callOpenAI(question);
       this.sendGPTMessage(
         channelId,
-        `🤖 **@${sender.accountId}** ${response}`
+        `🤖 **@${sender.accountId}** ${response}`,
+        currentMessageNonce
       );
     }
   }

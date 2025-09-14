@@ -32,6 +32,7 @@ export const getAllChannelConfigs = () => {
 export const getAvailableChannels = async (accountId, channels = null, wsClients = null) => {
   const availableChannels = {};
   
+  // First, add configured channels
   for (const [channelId, config] of Object.entries(channelsConfig)) {
     try {
       const hasAccess = await evaluateAllRules(accountId, config.rules);
@@ -57,12 +58,48 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
           description: config.description,
           isPublic: config.isPublic,
           defaultToken: config.defaultToken || "near",
+          tokenDecimals: config.tokenDecimals || 24,
           memberCount: memberCount,
           botsCount: botsCount,
+          isConfigured: true
         };
       }
     } catch (error) {
       console.error(`Error evaluating rules for channel ${channelId} and user ${accountId}:`, error);
+    }
+  }
+  
+  // Then, add user-created channels (not in config)
+  if (channels) {
+    for (const [channelId, channel] of channels) {
+      // Skip if already added from config
+      if (availableChannels[channelId]) continue;
+      
+      // For user-created channels, show them as public
+      const channelClients = channel.clients || new Map();
+      let memberCount = 0;
+      let botsCount = 0;
+      
+      // Count members vs bots
+      for (const [clientId, ws] of channelClients) {
+        const clientData = wsClients?.get(ws);
+        if (clientData?.isBot) {
+          botsCount++;
+        } else {
+          memberCount++;
+        }
+      }
+      
+      availableChannels[channelId] = {
+        name: channelId, // Use channel ID as name for user-created channels
+        description: "User-created channel",
+        isPublic: true, // User-created channels are public by default
+        defaultToken: "near",
+        tokenDecimals: 24,
+        memberCount: memberCount,
+        botsCount: botsCount,
+        isConfigured: false
+      };
     }
   }
   

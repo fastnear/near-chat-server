@@ -5,6 +5,7 @@
   "type": "module",
   "license": "MIT",
   "dependencies": {
+    "@defuse-protocol/intents-sdk": "^0.20.0",
     "@near-js/crypto": "^2.3.1",
     "@near-js/utils": "^2.3.1",
     "@noble/curves": "^1.9.6",
