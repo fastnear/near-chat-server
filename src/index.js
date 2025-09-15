@@ -614,12 +614,17 @@ function loadState() {
     
     // Check if channel exists in config - if yes, validate access
     const channelConfig = getChannelConfig(channelId);
-    if (channelConfig) {
-      const hasAccess = await canUserAccessChannel(accountId, channelId);
-      if (!hasAccess) {
-        throw new Error("Access denied to this channel");
+    
+    // Bot skips the access check
+    if (!client.isBot) {
+      if (channelConfig) {
+        const hasAccess = await canUserAccessChannel(accountId, channelId);
+        if (!hasAccess) {
+          throw new Error("Access denied to this channel");
+        }
       }
     }
+
     // If channel doesn't exist in config, allow free creation
     client.channels.set(channelId, {
       accountId,

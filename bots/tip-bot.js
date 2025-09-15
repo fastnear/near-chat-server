@@ -9,8 +9,8 @@ import * as nearAPI from "near-api-js";
 
 
 const WS_URL = process.env.WS_URL || "ws://localhost:7071";
-const BOT_ACCOUNT_ID = "zavodil.near";
-const BOT_PRIVATE_KEY = process.env.TIP_BOT_PRIVATE_KEY || "ed25519:3KyUuch8pYP47krBq4DosFEVBMR5wDTMQ8AThzM8kAEcBQHqjEtzBx4JhPQqpX2vGvPEAF7V2vPPm9h3PVfDaYeP";
+const BOT_ACCOUNT_ID = "tipbot.near";
+const BOT_PRIVATE_KEY = process.env.TIP_BOT_PRIVATE_KEY;
 
 class TipBot {
   constructor() {    

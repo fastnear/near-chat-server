@@ -5,8 +5,8 @@ import { getKeyPairFromPrivateKey, getPublicKeyFromKeyPair, signMessage } from "
 import { getBotConfig, loadBotsConfig } from "../src/bots-service.js";
 
 const WS_URL = process.env.WS_URL || "ws://localhost:7071";
-const BOT_ACCOUNT_ID = "zavodil.near";
-const BOT_PRIVATE_KEY = process.env.GPT_BOT_PRIVATE_KEY || "ed25519:3KyUuch8pYP47krBq4DosFEVBMR5wDTMQ8AThzM8kAEcBQHqjEtzBx4JhPQqpX2vGvPEAF7V2vPPm9h3PVfDaYeP";
+const BOT_ACCOUNT_ID = "ai-is-near.near";
+const BOT_PRIVATE_KEY = process.env.GPT_BOT_PRIVATE_KEY;
 
 // OpenAI Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
