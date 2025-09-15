@@ -22,28 +22,6 @@ const fetchNearRpc = async (method, params) => {
   return data.result;
 };
 
-const checkAccountAge = async (accountId, beforeDate) => {
-  try {
-    if (!isValidAccountId(accountId)) {
-      return false;
-    }
-    
-    const account = await fetchNearRpc("query", {
-      request_type: "view_account",
-      finality: "final",
-      account_id: accountId,
-    });
-    
-    const createdAt = new Date(account.block_height <= 170000000);
-    const cutoffDate = new Date(beforeDate);
-    
-    return createdAt < cutoffDate;
-  } catch (error) {
-    console.log(`Error checking account age for ${accountId}:`, error.message);
-    return false;
-  }
-};
-
 const checkNearBalance = async (accountId, minBalance) => {
   try {
     if (!isValidAccountId(accountId)) {
@@ -116,9 +94,6 @@ const checkWhitelist = async (accountId, accounts) => {
 
 export const evaluateRule = async (accountId, rule) => {
   switch (rule.type) {
-    case "account_age":
-      return await checkAccountAge(accountId, rule.before);
-    
     case "near_balance":
       return await checkNearBalance(accountId, rule.min);
     

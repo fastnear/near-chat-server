@@ -321,8 +321,32 @@ class TipBot {
   async processTip(channelId, senderAccountId, recipientAccountId, amount, tipMessage, senderPublicKey, currentMessageNonce) {
     try {
       const channelConfig = getChannelConfig(channelId);
-      const defaultToken = channelConfig?.defaultToken || "wrap.near";
-      
+
+      // Only process tips in configured channels (not user-created channels)
+      if (!channelConfig || !channelConfig.defaultToken) {
+        this.sendTipMessage(
+          channelId,
+          `❌ Tipping is not supported in this channel`,
+          currentMessageNonce
+        );
+        return;
+      }
+
+      const defaultToken = channelConfig.defaultToken;
+      const minTipAmount = channelConfig.minTipAmount || 0.01;
+
+      // Check minimum tip amount
+      if (amount < minTipAmount) {
+        const tokenSymbol = channelConfig?.tokenSymbol || defaultToken;
+        this.sendTipMessage(
+          channelId,
+          `❌ Minimum tip amount is ${minTipAmount} ${tokenSymbol}\n` +
+          `💰 You tried to tip ${amount} ${tokenSymbol}`,
+          currentMessageNonce
+        );
+        return;
+      }
+
       // Check if sender's public key is whitelisted on intents.near
       const isWhitelisted = await this.checkWhitelist(senderAccountId, senderPublicKey);
       

@@ -8,24 +8,13 @@
     "tokenSymbol": "WNEAR",
     "tokenDecimals": 24,
     "adminUsers": ["vadim.near", "zavodil.near"]
-  },
-  "og": {
-    "name": "OG Members", 
-    "description": "For accounts created before 2022",
-    "isPublic": false,
-    "rules": [
-      { "type": "account_age", "before": "2022-01-01" }
-    ],
-    "defaultToken": "wrap.near",
-    "tokenSymbol": "WNEAR",
-    "tokenDecimals": 24
-  },
+  },  
   "whales": {
     "name": "Whales",
-    "description": "For NEAR holders with 100+ NEAR",
+    "description": "For NEAR holders with 1000+ Native NEAR",
     "isPublic": false, 
     "rules": [
-      { "type": "near_balance", "min": 100 }
+      { "type": "near_balance", "min": 1000 }
     ],
     "defaultToken": "wrap.near",
     "tokenSymbol": "WNEAR",
@@ -33,7 +22,7 @@
   },
   "jambo": {
     "name": "JAMBO Holders",
-    "description": "For JAMBO token holders with 10k+ tokens",
+    "description": "For JAMBO token holders with 1+ tokens",
     "isPublic": false,
     "rules": [
       { "type": "ft_balance", "contract": "jambo-1679.meme-cooking.near", "min": 1 }
@@ -45,7 +34,7 @@
   "developers": {
     "name": "Developers",
     "description": "For NEAR developers",
-    "isPublic": false,
+    "isPublic": true,
     "rules": [],
     "defaultToken": "wrap.near",
     "tokenSymbol": "WNEAR",
@@ -54,7 +43,7 @@
   "memecoins": {
     "name": "Memecoins",
     "description": "Memecoin enthusiasts",
-    "isPublic": false,
+    "isPublic": true,
     "rules": [],
     "defaultToken": "wrap.near",    
     "tokenSymbol": "WNEAR",

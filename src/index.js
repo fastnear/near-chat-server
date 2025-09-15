@@ -23,6 +23,8 @@ const MAX_CHANNEL_LENGTH = 64;
 const GLOBAL_MESSAGE_QUEUE_SIZE = 1000000;
 const MAX_MESSAGE_DELAY_MS =
   parseFloat(process.env.MAX_MESSAGE_DELAY_MS) || 5000;
+const EMPTY_CHANNEL_CLEANUP_MS =
+  parseFloat(process.env.EMPTY_CHANNEL_CLEANUP_MS) || 60 * 60 * 1000; // 60 minutes
 
 const ResPath = process.env.RES_PATH || "res";
 const WsSubsFilename = ResPath + "/ws_subs.json";
@@ -57,6 +59,8 @@ function saveState() {
         nonce: channelData.nonce,
         messages: messages,
         createdBy: channelData.createdBy,
+        createdAt: channelData.createdAt,
+        lastActiveAt: channelData.lastActiveAt,
         // Skip non-serializable fields like 'clients' Map
       };
     }
@@ -133,6 +137,8 @@ function loadState() {
         channelId: channelData.channelId,
         nonce: channelData.nonce || 1,
         createdBy: channelData.createdBy,
+        createdAt: channelData.createdAt,
+        lastActiveAt: channelData.lastActiveAt || channelData.createdAt,
         clients: new Map(), // Will be populated as clients reconnect
         updates: updates // Restored from saved messages
       });
@@ -166,8 +172,33 @@ function loadState() {
     });
   };
   
+  // Cleanup empty user-created channels
+  const cleanupEmptyChannels = () => {
+    const now = Date.now();
+    const channelsToDelete = [];
+
+    for (const [channelId, channel] of channels.entries()) {
+      // Only cleanup user-created channels (have createdBy field)
+      if (channel.createdBy) {
+        const isEmpty = channel.clients.size === 0;
+        const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
+
+        if (isEmpty && isInactive) {
+          console.log(`🗑️ Cleaning up empty user channel: ${channelId} (inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes)`);
+          channelsToDelete.push(channelId);
+        }
+      }
+    }
+
+    // Delete the channels
+    for (const channelId of channelsToDelete) {
+      channels.delete(channelId);
+    }
+  };
+
   // Run cleanup every minute
   setInterval(cleanupExpiredIntents, 60 * 1000);
+  setInterval(cleanupEmptyChannels, 2 * 60 * 1000); // Every 2 minutes
 
   loadBotsConfig();
   loadChannelsConfig();
@@ -203,7 +234,6 @@ function loadState() {
         }
         
         const result = await response.json();
-        console.log("Intent status response:", result);
         
         if (result.result.status === "SETTLED") {
           console.log("Success! Intent settled");
@@ -542,19 +572,17 @@ function loadState() {
     const channelId = channel.channelId;
     addGlobalMessage(channelId, update.timestampMs);
     channel.updates.push({ update, signedData });
+
+    // Update last activity time for user-created channels
+    if (channel.createdBy) {
+      channel.lastActiveAt = Date.now();
+    }
+
     channel.clients.forEach((ws, clientWs) => {
       try {
-        const client = wsClients.get(clientWs);
-        const currentUserAccountId = client?.accountId;
-        
-        // Add canDelete field based on user permissions
+        // Remove canDelete from real-time messages - client will calculate it
         const messageWithPermissions = {
-          ...update,
-          canDelete: canUserDeleteMessage(
-            update.clientIdentity.accountId, 
-            currentUserAccountId, 
-            channelId
-          )
+          ...update
         };
         
         ws.send(
@@ -604,8 +632,13 @@ function loadState() {
         clients: new Map(),
         updates: [],
         nonce: 1,
+        createdBy: accountId, // Track who created this channel
+        createdAt: Date.now(), // Track when it was created
+        lastActiveAt: Date.now() // Track last activity
       });
-      
+
+      console.log(`📝 User-created channel "${channelId}" created by ${accountId}`);
+
       // Start bots for this channel if it's newly created
       setTimeout(() => {
         botManager.startBotsForChannel(channelId);
@@ -614,6 +647,23 @@ function loadState() {
     const channel = channels.get(channelId);
     channel.clients.set(client.clientId, ws);
     addChannelMessage(channel, "joined", data.message, data, signedData);
+
+    // Send join confirmation with moderation rights to the user
+    const isChannelModerator = channelConfig && channelConfig.adminUsers &&
+                               channelConfig.adminUsers.includes(accountId);
+
+    try {
+      ws.send(JSON.stringify({
+        type: "join_success",
+        data: {
+          channelId: channelId,
+          isChannelModerator: isChannelModerator || false,
+          accountId: accountId
+        }
+      }));
+    } catch (e) {
+      console.log("Failed to send join confirmation", e);
+    }
   };
 
   const handleLeave = (ws, req, data, signedData) => {
@@ -682,9 +732,7 @@ function loadState() {
     validateClientChannel(client, data, channel);
     const updates = channel.updates.slice(-MAX_HISTORY);
     
-    // Get current user for permissions
-    const wsClient = wsClients.get(ws);
-    const currentUserAccountId = wsClient?.accountId;
+    // Permissions are now handled client-side
     
     try {
       ws.send(
@@ -692,14 +740,7 @@ function loadState() {
           type: "history",
           data: {
             channelId,
-            history: updates.map(({ update }) => ({
-              ...update,
-              canDelete: canUserDeleteMessage(
-                update.clientIdentity.accountId,
-                currentUserAccountId,
-                channelId
-              )
-            })),
+            history: updates.map(({ update }) => update), // Remove canDelete from history - client will calculate it
           },
         }),
       );

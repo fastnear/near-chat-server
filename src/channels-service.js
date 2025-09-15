@@ -59,6 +59,8 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
           isPublic: config.isPublic,
           defaultToken: config.defaultToken || "near",
           tokenDecimals: config.tokenDecimals || 24,
+          tokenSymbol: config.tokenSymbol || (config.defaultToken || "near"),
+          minTipAmount: config.minTipAmount || 0.01,
           memberCount: memberCount,
           botsCount: botsCount,
           isConfigured: true
@@ -94,11 +96,14 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
         name: channelId, // Use channel ID as name for user-created channels
         description: "User-created channel",
         isPublic: true, // User-created channels are public by default
-        defaultToken: "near",
-        tokenDecimals: 24,
+        defaultToken: "", // No tip bot support for user channels
+        tokenDecimals: 0,
+        tokenSymbol: "",
         memberCount: memberCount,
         botsCount: botsCount,
-        isConfigured: false
+        isConfigured: false,
+        createdBy: channel.createdBy,
+        createdAt: channel.createdAt
       };
     }
   }
