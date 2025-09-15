@@ -71,42 +71,8 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
     }
   }
   
-  // Then, add user-created channels (not in config)
-  if (channels) {
-    for (const [channelId, channel] of channels) {
-      // Skip if already added from config
-      if (availableChannels[channelId]) continue;
-      
-      // For user-created channels, show them as public
-      const channelClients = channel.clients || new Map();
-      let memberCount = 0;
-      let botsCount = 0;
-      
-      // Count members vs bots
-      for (const [clientId, ws] of channelClients) {
-        const clientData = wsClients?.get(ws);
-        if (clientData?.isBot) {
-          botsCount++;
-        } else {
-          memberCount++;
-        }
-      }
-      
-      availableChannels[channelId] = {
-        name: channelId, // Use channel ID as name for user-created channels
-        description: "User-created channel",
-        isPublic: true, // User-created channels are public by default
-        defaultToken: "", // No tip bot support for user channels
-        tokenDecimals: 0,
-        tokenSymbol: "",
-        memberCount: memberCount,
-        botsCount: botsCount,
-        isConfigured: false,
-        createdBy: channel.createdBy,
-        createdAt: channel.createdAt
-      };
-    }
-  }
+  // User-created channels are private and not shown in the general list
+  // They can only be accessed by direct join
   
   return availableChannels;
 };

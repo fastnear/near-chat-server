@@ -16,6 +16,7 @@ import {
 import { WebSocketServer } from "ws";
 import { loadChannelsConfig, getAvailableChannels, canUserAccessChannel, getChannelConfig } from "./channels-service.js";
 import { loadBotsConfig, isValidBot, getBotsForMessage, getBotConfig, getAllBotsConfig } from "./bots-service.js";
+import { getKeyPairFromPrivateKey, getPublicKeyFromKeyPair } from "../src/near.js";
 import BotManager from "./bot-manager.js";
 
 const MAX_HISTORY = 1000;
@@ -36,13 +37,30 @@ let pendingIntents;
 
 function assertValidChannelId(channelId) {
   if (!channelId) {
-    throw new Error("channelId is empty");
+    throw new Error("Channel name is empty");
   }
   if (!isString(channelId)) {
-    throw new Error("channelId is not a string");
+    throw new Error("Channel name must be a string");
+  }
+  if (channelId.trim() !== channelId) {
+    throw new Error("Channel name cannot start or end with spaces");
+  }
+  if (channelId.length < 2) {
+    throw new Error("Channel name must be at least 2 characters long");
   }
   if (channelId.length > MAX_CHANNEL_LENGTH) {
-    throw new Error(`channelId is longer than ${MAX_CHANNEL_LENGTH}`);
+    throw new Error(`Channel name is longer than ${MAX_CHANNEL_LENGTH} characters`);
+  }
+
+  // Only allow alphanumeric characters, hyphens, and underscores
+  const validPattern = /^[a-zA-Z0-9_-]+$/;
+  if (!validPattern.test(channelId)) {
+    throw new Error("Channel name can only contain letters, numbers, hyphens (-), and underscores (_)");
+  }
+
+  // Don't allow names starting with numbers or special characters
+  if (!/^[a-zA-Z]/.test(channelId)) {
+    throw new Error("Channel name must start with a letter");
   }
 }
 
@@ -251,7 +269,8 @@ function loadState() {
               status: "success",
               from: pendingIntent.requester,
               to: pendingIntent.recipient,
-              amount: pendingIntent.humanAmount || pendingIntent.amount,
+              amount: pendingIntent.amount,
+              humanAmount: pendingIntent.humanAmount,
               token: pendingIntent.token,
               transactionHash: transactionHash,
               message: `✅ ${pendingIntent.requester} tipped ${pendingIntent.recipient} ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.tokenSymbol}`
@@ -261,13 +280,20 @@ function loadState() {
           // Send tip bot message as reply with transaction link
           const channel = channels.get(pendingIntent.channelId);
           if (channel) {
+            // Get tip bot public key from private key
+            const botPrivateKey = process.env.TIP_BOT_PRIVATE_KEY;
+            const botKeyPair = botPrivateKey ? getKeyPairFromPrivateKey(botPrivateKey) : null;
+            const botPublicKey = botKeyPair ? getPublicKeyFromKeyPair(botKeyPair) : "";
+
+            console.log("Tip bot public key:", botPublicKey);
+
             const tipBotMessage = {
               action: "message",
               channelId: pendingIntent.channelId,
               clientIdentity: {
-                accountId: "zavodil.near", // tip bot account
+                accountId: process.env.TIP_BOT_ACCOUNT_ID || "tipbot.near",
                 contractId: "social.near",
-                publicKey: "ed25519:3KyUuch8pYP47krBq4DosFEVBMR5wDTMQ8AThzM8kAEcBQHqjEtzBx4JhPQqpX2vGvPEAF7V2vPPm9h3PVfDaYeP",
+                publicKey: botPublicKey,
                 clientId: "tip-bot",
               },
               message: {
@@ -307,7 +333,8 @@ function loadState() {
               status: "error",
               from: pendingIntent.requester,
               to: pendingIntent.recipient,
-              amount: pendingIntent.humanAmount || pendingIntent.amount,
+              amount: pendingIntent.amount,
+              humanAmount: pendingIntent.humanAmount,
               token: pendingIntent.token,
               message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: Intent not found or invalid`
             }
@@ -328,7 +355,8 @@ function loadState() {
               status: "timeout",
               from: pendingIntent.requester,
               to: pendingIntent.recipient,
-              amount: pendingIntent.humanAmount || pendingIntent.amount,
+              amount: pendingIntent.amount,
+              humanAmount: pendingIntent.humanAmount,
               token: pendingIntent.token,
               message: `⏰ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} is taking longer than expected`
             }
@@ -353,7 +381,8 @@ function loadState() {
             status: "error",
             from: pendingIntent.requester,
             to: pendingIntent.recipient,
-            amount: pendingIntent.humanAmount || pendingIntent.amount,
+            amount: pendingIntent.amount,
+            humanAmount: pendingIntent.humanAmount,
             token: pendingIntent.token,
             message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: ${error.message}`
           }
@@ -498,6 +527,7 @@ function loadState() {
       const expectedContractId =
         chainAccessKey.permission?.FunctionCall?.receiver_id;
       if (expectedContractId !== contractId) {
+        console.log("Account Id:", accountId);
         console.log("Expected contractId:", expectedContractId);
         console.log("Provided contractId:", contractId);  
         throw new Error("Access key contractId doesn't match");
@@ -901,6 +931,7 @@ function loadState() {
         from: pendingIntent.requester,
         to: pendingIntent.recipient,
         amount: pendingIntent.amount,
+        humanAmount: pendingIntent.humanAmount,
         token: pendingIntent.token,
         message: `🔄 Processing tip from ${pendingIntent.requester} to ${pendingIntent.recipient}...`
       }
@@ -956,18 +987,18 @@ function loadState() {
         // Check if it's a public key not found error
         if (errorReason.includes("public key") && errorReason.includes("doesn't exist")) {
           // Send public message to all channel members
-          broadcastToChannel(pendingIntent.channelId, {
-            type: "tip_status",
-            data: {
-              intentId: intentId,
-              status: "error",
-              from: pendingIntent.requester,
-              to: pendingIntent.recipient,
-              amount: pendingIntent.amount,
-              token: pendingIntent.token,
-              message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: Public key not registered on intents.near`
-            }
-          });
+          // broadcastToChannel(pendingIntent.channelId, {
+          //   type: "tip_status",
+          //   data: {
+          //     intentId: intentId,
+          //     status: "error",
+          //     from: pendingIntent.requester,
+          //     to: pendingIntent.recipient,
+          //     amount: pendingIntent.amount,
+          //     token: pendingIntent.token,
+          //     message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: Public key not registered on intents.near`
+          //   }
+          // });
           
           // Send private message to the sender with add key data
           const senderClient = [...wsClients.entries()].find(([ws, client]) => {
@@ -1004,6 +1035,7 @@ function loadState() {
               from: pendingIntent.requester,
               to: pendingIntent.recipient,
               amount: pendingIntent.amount,
+              humanAmount: pendingIntent.humanAmount,
               token: pendingIntent.token,
               message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: ${errorReason}`
             }
@@ -1026,6 +1058,7 @@ function loadState() {
           from: pendingIntent.requester,
           to: pendingIntent.recipient,
           amount: pendingIntent.amount,
+          humanAmount: pendingIntent.humanAmount,
           token: pendingIntent.token,
           error: error.message,
           message: `❌ Tip failed: ${error.message}`
@@ -1075,6 +1108,7 @@ function loadState() {
             from: requester,
             to: recipient,
             amount: amount,
+            humanAmount: humanAmount,
             token: defaultToken,
             error: "Intent signing timeout",
             message: `❌ Tip from ${requester} to ${recipient} timed out (not signed within 5 minutes)`
@@ -1148,6 +1182,7 @@ function loadState() {
         type: "deposit_ui",
         data: {
           channelId,
+          accountId: targetAccountId,
           token,
           requiredAmount, // Human readable amount
           decimals,
@@ -1178,8 +1213,9 @@ function loadState() {
     });
 
     ws.on("message", async (dataString) => {
-      try {
+      try {        
         const signedData = JSON.parse(dataString);
+        console.log("WS Message", clientId, signedData);
         const data = await validateDataAndSignature(signedData);
         data.client = wsClients.get(ws);
 

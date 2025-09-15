@@ -1,9 +1,9 @@
 import { isValidAccountId } from "./near.js";
 
-const NEAR_RPC_URL = process.env.NEAR_RPC_URL || "https://rpc.mainnet.near.org";
+const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.near.org";
 
 const fetchNearRpc = async (method, params) => {
-  const response = await fetch(NEAR_RPC_URL, {
+  const response = await fetch(NODE_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

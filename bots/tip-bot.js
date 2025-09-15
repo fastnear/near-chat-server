@@ -11,6 +11,7 @@ import * as nearAPI from "near-api-js";
 const WS_URL = process.env.WS_URL || "ws://localhost:7071";
 const BOT_ACCOUNT_ID = "tipbot.near";
 const BOT_PRIVATE_KEY = process.env.TIP_BOT_PRIVATE_KEY;
+const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.fastnear.com";
 
 class TipBot {
   constructor() {    
@@ -25,10 +26,10 @@ class TipBot {
       // Configure NEAR connection for intents.near contract calls
       this.near = new nearAPI.Near({
         networkId: "mainnet",
-        nodeUrl: "https://rpc.mainnet.near.org",
-        walletUrl: "https://wallet.mainnet.near.org",
+        nodeUrl: NODE_URL,
+        walletUrl: "https://app.mynearwallet.com/",
         helperUrl: "https://helper.mainnet.near.org",
-        explorerUrl: "https://explorer.mainnet.near.org"
+        explorerUrl: "https://nearblocks.io/"
       });
       
       // Configure IntentsSDK for tip transfers
@@ -347,20 +348,20 @@ class TipBot {
         return;
       }
 
-      // Check if sender's public key is whitelisted on intents.near
-      const isWhitelisted = await this.checkWhitelist(senderAccountId, senderPublicKey);
+      // // Check if sender's public key is whitelisted on intents.near
+      // const isWhitelisted = await this.checkWhitelist(senderAccountId, senderPublicKey);
       
-      if (!isWhitelisted) {
-        this.sendTipMessage(
-          channelId,
-          `❌ Your public key is not whitelisted on intents.near.\n` +
-          `🔗 Add your key to whitelist: https://intents.near.org/whitelist\n` +
-          `📋 Your account: ${senderAccountId}\n` +
-          `🔑 Your key: ${senderPublicKey}`,
-          currentMessageNonce
-        );
-        return;
-      }
+      // if (!isWhitelisted) {
+      //   this.sendTipMessage(
+      //     channelId,
+      //     `❌ Your public key is not whitelisted on intents.near.\n` +
+      //     `🔗 Add your key to whitelist: https://intents.near.org/whitelist\n` +
+      //     `📋 Your account: ${senderAccountId}\n` +
+      //     `🔑 Your key: ${senderPublicKey}`,
+      //     currentMessageNonce
+      //   );
+      //   return;
+      // }
       
       const requiredAmount = this.getTokenAmountWithDecimals(amount, channelId);
       // Check balance (simplified for now)
@@ -403,34 +404,34 @@ class TipBot {
     }
   }
 
-  async checkWhitelist(accountId, publicKey) {
-    try {
-      console.log(`Checking whitelist for ${accountId} with key ${publicKey}`);
-      return true;
+  // async checkWhitelist(accountId, publicKey) {
+  //   try {
+  //     console.log(`Checking whitelist for ${accountId} with key ${publicKey}`);
+  //     return true;
       
-      // Check if account is whitelisted on intents.near contract
-      const account = await this.near.account("dontcare");
-      const result = await account.viewFunction(
-        "intents.near",
-        "is_whitelisted_account", 
-        {
-          account_id: accountId
-        }
-      );
+  //     // Check if account is whitelisted on intents.near contract
+  //     const account = await this.near.account("dontcare");
+  //     const result = await account.viewFunction(
+  //       "intents.near",
+  //       "is_whitelisted_account", 
+  //       {
+  //         account_id: accountId
+  //       }
+  //     );
       
-      console.log(`Whitelist check result for ${accountId}:`, result);
-      return result === true;
+  //     console.log(`Whitelist check result for ${accountId}:`, result);
+  //     return result === true;
       
-    } catch (error) {
-      console.error("Error checking whitelist:", error);
-      // For testing, allow if method doesn't exist yet
-      if (error.message.includes("MethodNotFound")) {
-        console.log("Whitelist method not found, allowing for testing");
-        return true;
-      }
-      return false;
-    }
-  }
+  //   } catch (error) {
+  //     console.error("Error checking whitelist:", error);
+  //     // For testing, allow if method doesn't exist yet
+  //     if (error.message.includes("MethodNotFound")) {
+  //       console.log("Whitelist method not found, allowing for testing");
+  //       return true;
+  //     }
+  //     return false;
+  //   }
+  // }
 
   getTokenAmountWithDecimals(amount, channelId) {
       const channelConfig = getChannelConfig(channelId);
