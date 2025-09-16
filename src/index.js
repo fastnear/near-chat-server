@@ -469,6 +469,19 @@ function loadState() {
   const wss = new WebSocketServer({ port: WS_PORT });
   console.log("WebSocket server listening on http://localhost:%d/", WS_PORT);
 
+  // WebSocket heartbeat to prevent disconnections
+  const heartbeat = setInterval(() => {
+    wss.clients.forEach(ws => {
+      if (ws.isAlive === false) {
+        console.log("Terminating dead connection");
+        ws.terminate();
+        return;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000); // every 30 seconds
+
   // Start all bots after server is ready
   setTimeout(() => {
     console.log("🤖 Starting all enabled bots...");
@@ -1200,6 +1213,12 @@ function loadState() {
     const clientId = uuidv4();
     console.log("WS Connection open", clientId);
     ws.on("error", console.error);
+
+    // Initialize heartbeat
+    ws.isAlive = true;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
 
     wsClients.set(ws, {
       clientId,
