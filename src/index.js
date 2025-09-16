@@ -12,6 +12,7 @@ import {
   keyToString,
   derivePublicKeyFromImplicitAccountId,
   fetchAndCacheAccessKey,
+  checkStorageBalance,
 } from "./near.js";
 import { WebSocketServer } from "ws";
 import { loadChannelsConfig, getAvailableChannels, canUserAccessChannel, getChannelConfig } from "./channels-service.js";
@@ -277,44 +278,28 @@ function loadState() {
             }
           });
           
-          // Send tip bot message as reply with transaction link
-          const channel = channels.get(pendingIntent.channelId);
-          if (channel) {
-            // Get tip bot public key from private key
-            const botPrivateKey = process.env.TIP_BOT_PRIVATE_KEY;
-            const botKeyPair = botPrivateKey ? getKeyPairFromPrivateKey(botPrivateKey) : null;
-            const botPublicKey = botKeyPair ? getPublicKeyFromKeyPair(botKeyPair) : "";
-
-            console.log("Tip bot public key:", botPublicKey);
-
-            const tipBotMessage = {
-              action: "message",
-              channelId: pendingIntent.channelId,
-              clientIdentity: {
-                accountId: process.env.TIP_BOT_ACCOUNT_ID || "tipbot.near",
-                contractId: "social.near",
-                publicKey: botPublicKey,
-                clientId: "tip-bot",
-              },
-              message: {
-                text: `✅ Tip successful! @${pendingIntent.requester} sent ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.tokenSymbol} to ${pendingIntent.recipient}. View transaction: https://nearblocks.io/txns/${transactionHash}`,
-                replyTo: pendingIntent.replyToNonce
-              },
-              timestampMs: Date.now(),
-              nonce: channel.nonce++,
-            };
-            
-            // Broadcast tip bot reply to all channel members
-            channel.clients.forEach((ws) => {
+          // Send notification to tip-bot to post success message
+          for (const [clientWs, client] of wsClients.entries()) {
+            if (client.isBot && client.botId === "tip-bot") {
               try {
-                ws.send(JSON.stringify({
-                  type: "channel",
-                  data: tipBotMessage
+                clientWs.send(JSON.stringify({
+                  type: "tip_success",
+                  data: {
+                    channelId: pendingIntent.channelId,
+                    requester: pendingIntent.requester,
+                    recipient: pendingIntent.recipient,
+                    humanAmount: pendingIntent.humanAmount || pendingIntent.amount,
+                    tokenSymbol: pendingIntent.tokenSymbol,
+                    transactionHash,
+                    replyToNonce: pendingIntent.replyToNonce
+                  }
                 }));
+                console.log("Sent tip success notification to tip-bot");
+                break;
               } catch (e) {
-                console.log("Failed to broadcast tip bot message", e);
+                console.error("Failed to send tip success notification to tip-bot:", e);
               }
-            });
+            }
           }
           
           // Clean up processed intent
@@ -1144,7 +1129,66 @@ function loadState() {
     if (!requesterWs) {
       throw new Error("Requester not found in channel");
     }
-    
+
+    // Check recipient's storage balance before proceeding
+    try {
+      const storageBalance = await checkStorageBalance(defaultToken, recipient);
+      console.log(`Storage balance for ${recipient} in ${defaultToken}:`, storageBalance);
+
+      if (!storageBalance || storageBalance.total === "0" || storageBalance.total === null) {
+        // Recipient is not registered - send storage_deposit_ui request
+        console.log(`Recipient ${recipient} not registered in token ${defaultToken}, requesting storage deposit`);
+
+        requesterWs.send(JSON.stringify({
+          type: "storage_deposit_ui",
+          data: {
+            intentId,
+            recipient,
+            amount,
+            humanAmount,
+            token: defaultToken,
+            tokenSymbol,
+            originalMessage,
+            requester,
+            depositAmount: "12500000000000000000000", // 0.0125 NEAR in yoctoNEAR
+            gas: "30000000000000" // 30 TGas
+          }
+        }));
+
+        // Send notification to tip-bot to post registration message
+        const registrationMessage = `🏦 ${recipient} is not registered in ${tokenSymbol} token yet. We've asked ${requester} to register ${recipient} in the token contract so they can receive tips.`;
+
+        // Find tip-bot and send notification
+        for (const [clientWs, client] of wsClients.entries()) {
+          if (client.isBot && client.botId === "tip-bot") {
+            try {
+              clientWs.send(JSON.stringify({
+                type: "storage_registration_required",
+                data: {
+                  channelId,
+                  message: registrationMessage,
+                  replyToNonce,
+                  recipient,
+                  requester,
+                  tokenSymbol
+                }
+              }));
+              console.log("Sent storage registration notification to tip-bot");
+              break;
+            } catch (e) {
+              console.error("Failed to send storage registration notification to tip-bot:", e);
+            }
+          }
+        }
+
+        console.log(`Sent storage_deposit_ui request to ${requester} for ${recipient}`);
+        return; // Don't proceed with sign_intent
+      }
+    } catch (error) {
+      console.error(`Error checking storage balance for ${recipient}:`, error);
+      // Continue with sign_intent if storage check fails
+    }
+
     // Send sign_intent to the requester
     try {
       requesterWs.send(JSON.stringify({
@@ -1159,7 +1203,7 @@ function loadState() {
           requester
         }
       }));
-      
+
       console.log(`Sent sign_intent ${intentId} to ${requester}`);
     } catch (e) {
       console.error("Failed to send sign_intent:", e);

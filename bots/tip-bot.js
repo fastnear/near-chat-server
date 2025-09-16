@@ -189,6 +189,24 @@ class TipBot {
     });
   }
 
+  handleStorageRegistrationRequired(data) {
+    const { channelId, message, replyToNonce } = data;
+    console.log(`Storage registration required in ${channelId}: ${message}`);
+
+    // Send message to channel using tip bot's sendTipMessage function
+    this.sendTipMessage(channelId, message, replyToNonce);
+  }
+
+  handleTipSuccess(data) {
+    const { channelId, requester, recipient, humanAmount, tokenSymbol, transactionHash, replyToNonce } = data;
+    console.log(`Tip success in ${channelId}: ${requester} -> ${recipient} ${humanAmount} ${tokenSymbol}`);
+
+    const successMessage = `✅ Tip successful! @${requester} sent ${humanAmount} ${tokenSymbol} to ${recipient}. View transaction: https://nearblocks.io/txns/${transactionHash}`;
+
+    // Send message to channel using tip bot's sendTipMessage function
+    this.sendTipMessage(channelId, successMessage, replyToNonce);
+  }
+
   handleMessage(message) {
     switch (message.type) {
       case "bot_registered":
@@ -204,6 +222,14 @@ class TipBot {
 
       case "error":
         console.error("Server error:", message.error);
+        break;
+
+      case "storage_registration_required":
+        this.handleStorageRegistrationRequired(message.data);
+        break;
+
+      case "tip_success":
+        this.handleTipSuccess(message.data);
         break;
 
       default:
@@ -335,10 +361,10 @@ class TipBot {
 
       const defaultToken = channelConfig.defaultToken;
       const minTipAmount = channelConfig.minTipAmount || 0.01;
+      const tokenSymbol = channelConfig?.tokenSymbol || defaultToken;
 
       // Check minimum tip amount
-      if (amount < minTipAmount) {
-        const tokenSymbol = channelConfig?.tokenSymbol || defaultToken;
+      if (amount < minTipAmount) {        
         this.sendTipMessage(
           channelId,
           `❌ Minimum tip amount is ${minTipAmount} ${tokenSymbol}\n` +
@@ -372,7 +398,7 @@ class TipBot {
         this.sendTipMessage(
           channelId,
           `❌ ${senderAccountId} has insufficient balance for this tip\n` +
-          `💰 Required: ${amount} ${defaultToken}`,
+          `💰 Required: ${amount} ${tokenSymbol}`,
           currentMessageNonce
         );
 

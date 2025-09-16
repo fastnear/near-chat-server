@@ -168,6 +168,50 @@ const signMessage = async (message, keyPair) => {
     }
   }
 
+const viewFunction = async (contractId, methodName, args = {}) => {
+  const response = await fetch(NODE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `near-chat-${Date.now()}`,
+      method: "query",
+      params: {
+        request_type: "call_function",
+        account_id: contractId,
+        method_name: methodName,
+        args_base64: btoa(JSON.stringify(args)),
+        finality: NEAR_FINALITY,
+      },
+    }),
+  });
+  const result = await response.json();
+  if (result.error) {
+    throw new Error(JSON.stringify(result.error));
+  }
+
+  // Parse the result
+  try {
+    const resultString = new TextDecoder().decode(new Uint8Array(result.result.result));
+    return JSON.parse(resultString);
+  } catch (e) {
+    console.error("Failed to parse view function result:", e);
+    return null;
+  }
+}
+
+const checkStorageBalance = async (tokenContract, accountId) => {
+  try {
+    const result = await viewFunction(tokenContract, "storage_balance_of", {
+      account_id: accountId
+    });
+    return result;
+  } catch (error) {
+    console.error(`Failed to check storage balance for ${accountId} in ${tokenContract}:`, error);
+    return null;
+  }
+}
+
 export {
   isValidAccountId,
   keyToString,
@@ -178,5 +222,7 @@ export {
   fetchAndCacheAccessKey,
   getPublicKeyFromKeyPair,
   getKeyPairFromPrivateKey,
-  signMessage
+  signMessage,
+  viewFunction,
+  checkStorageBalance
 };
