@@ -57,13 +57,24 @@
     "description": "Exclusive access",
     "isPublic": false,
     "rules": [
-      { 
-        "type": "whitelist", 
-        "accounts": ["vadim.near", "mob.near", "mike.near"] 
+      {
+        "type": "whitelist",
+        "accounts": ["vadim.near", "mob.near", "mike.near"]
       }
     ],
-    "defaultToken": "",    
+    "defaultToken": "",
     "tokenSymbol": "",
     "tokenDecimals": 24
+  },
+  "support": {
+    "name": "Support",
+    "description": "Chat to improve the chat",
+    "isPublic": true,
+    "showInDiscovery": false,
+    "rules": [],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "adminUsers": ["vadim.near", "mob.near"]
   }
 }

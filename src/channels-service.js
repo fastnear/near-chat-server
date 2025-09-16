@@ -36,13 +36,14 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
   for (const [channelId, config] of Object.entries(channelsConfig)) {
     try {
       const hasAccess = await evaluateAllRules(accountId, config.rules);
-      
-      if (hasAccess) {
+      const showInDiscovery = config.showInDiscovery !== false; // Default to true if not specified
+
+      if (hasAccess && showInDiscovery) {
         // Get member and bot counts from active channels
         const channelClients = channels?.get(channelId)?.clients || new Map();
         let memberCount = 0;
         let botsCount = 0;
-        
+
         // Count members vs bots based on wsClients data
         for (const [clientId, ws] of channelClients) {
           const clientData = wsClients?.get(ws);
@@ -52,14 +53,14 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
             memberCount++;
           }
         }
-        
+
         availableChannels[channelId] = {
           name: config.name,
           description: config.description,
           isPublic: config.isPublic,
-          defaultToken: config.defaultToken || "near",
+          defaultToken: config.defaultToken || "",
           tokenDecimals: config.tokenDecimals || 24,
-          tokenSymbol: config.tokenSymbol || (config.defaultToken || "near"),
+          tokenSymbol: config.tokenSymbol || "",
           minTipAmount: config.minTipAmount || 0.01,
           memberCount: memberCount,
           botsCount: botsCount,
