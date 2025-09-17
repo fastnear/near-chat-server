@@ -62,6 +62,7 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 - `members` - Request channel members
 - `delete_message` - Delete message (with permissions)
 - `available_channels` - Get list of available channels (includes both configured channels user can access and user-created channels they've joined)
+- Note: Bot activity messages (join/leave/disconnect) include `isBot: true` field for client filtering
 
 ### Environment Variables
 - `WS_PORT` - WebSocket server port (default: 7071)

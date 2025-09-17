@@ -650,3 +650,71 @@ const reactionData = {
 | `reaction_details` | Response with detailed reactions | `channelId`, `messageNonce`, `reactions[]` |
 
 All notifications include `channelId` for proper client-side routing.
+
+## Bot Activity Messages
+
+Messages with `action: "joined"`, `action: "left"`, or `action: "disconnected"` from bots include an `isBot: true` field:
+
+```javascript
+// Bot joining channel
+{
+  "action": "joined",
+  "clientIdentity": {
+    "accountId": "ai-is-near.near",
+    "contractId": "social.near",
+    "publicKey": "ed25519:...",
+    "clientId": "uuid-123"
+  },
+  "message": "GPT Assistant has joined the channel",
+  "timestampMs": 1758106173634,
+  "nonce": 260,
+  "isBot": true  // ← Only present for bot activity
+}
+
+// Human joining channel (no isBot field)
+{
+  "action": "joined",
+  "clientIdentity": {
+    "accountId": "alice.near",
+    "contractId": null,
+    "publicKey": "ed25519:...",
+    "clientId": "uuid-456"
+  },
+  "message": "alice.near joined the channel",
+  "timestampMs": 1758106173635,
+  "nonce": 261
+  // No isBot field for humans
+}
+```
+
+### Client Usage
+
+```javascript
+// Filter out bot activity from chat history
+const filterMessages = (messages) => {
+  return messages.filter(msg => {
+    // Hide bot join/leave messages
+    if (msg.isBot && (msg.action === 'joined' || msg.action === 'left' || msg.action === 'disconnected')) {
+      return false;
+    }
+    return true;
+  });
+};
+
+// Or show bot activity differently
+const renderMessage = (msg) => {
+  if (msg.isBot && msg.action === 'joined') {
+    return <BotJoinedNotice message={msg} />;
+  }
+  if (msg.action === 'joined') {
+    return <UserJoinedNotice message={msg} />;
+  }
+  return <RegularMessage message={msg} />;
+};
+```
+
+This allows clients to:
+- Hide bot activity from main chat flow
+- Show bot joins in a separate notifications area
+- Style bot messages differently from user messages
+- Keep clean chat history focused on human conversation

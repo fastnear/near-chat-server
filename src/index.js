@@ -26,7 +26,7 @@ const GLOBAL_MESSAGE_QUEUE_SIZE = 1000000;
 const MAX_MESSAGE_DELAY_MS =
   parseFloat(process.env.MAX_MESSAGE_DELAY_MS) || 5000;
 const EMPTY_CHANNEL_CLEANUP_MS =
-  parseFloat(process.env.EMPTY_CHANNEL_CLEANUP_MS) || 60 * 60 * 1000; // 60 minutes
+  parseFloat(process.env.EMPTY_CHANNEL_CLEANUP_MS) || 12 * 60 * 60 * 1000; // 12 hours
 const MAX_REACTIONS_PER_USER_PER_MESSAGE = 1; // Maximum reactions one user can have on one message
 
 const ResPath = process.env.RES_PATH || "res";
@@ -36,6 +36,7 @@ const StateFilename = ResPath + "/server-state.json";
 // Global variables for state management
 let channels;
 let pendingIntents;
+let userChannelVisits; // Map<accountId, Set<channelId>> - tracks which channels user has visited
 
 function assertValidChannelId(channelId) {
   if (!channelId) {
@@ -88,9 +89,16 @@ function saveState() {
       };
     }
 
+    // Convert userChannelVisits Map to serializable object
+    const userVisitsObj = {};
+    for (const [accountId, channelSet] of userChannelVisits.entries()) {
+      userVisitsObj[accountId] = Array.from(channelSet);
+    }
+
     const state = {
       timestamp: Date.now(),
-      channels: channelsObj
+      channels: channelsObj,
+      userChannelVisits: userVisitsObj
     };
 
     saveJson(state, StateFilename);
@@ -145,6 +153,7 @@ function loadState() {
   // Initialize global state variables
   channels = new Map();
   pendingIntents = new Map(); // intentId -> intent data
+  userChannelVisits = new Map(); // accountId -> Set<channelId>
 
   // Restore saved state if available
   if (savedState && savedState.channels) {
@@ -173,6 +182,13 @@ function loadState() {
         clients: new Map(), // Will be populated as clients reconnect
         updates: updates // Restored from saved messages
       });
+    }
+  }
+
+  // Restore userChannelVisits if available
+  if (savedState && savedState.userChannelVisits) {
+    for (const [accountId, channelArray] of Object.entries(savedState.userChannelVisits)) {
+      userChannelVisits.set(accountId, new Set(channelArray));
     }
   }
 
@@ -221,9 +237,18 @@ function loadState() {
       }
     }
 
-    // Delete the channels
+    // Delete the channels and remove from all user visit histories
     for (const channelId of channelsToDelete) {
       channels.delete(channelId);
+
+      // Remove this channel from all users' visit history
+      for (const [accountId, visitedChannels] of userChannelVisits.entries()) {
+        visitedChannels.delete(channelId);
+        // Clean up empty visit sets
+        if (visitedChannels.size === 0) {
+          userChannelVisits.delete(accountId);
+        }
+      }
     }
   };
 
@@ -611,6 +636,11 @@ function loadState() {
       nonce: channel.nonce++,
     };
 
+    // Add isBot flag for join/left actions if it's a bot
+    if ((action === "joined" || action === "left" || action === "disconnected") && client.isBot) {
+      update.isBot = true;
+    }
+
     // Add messageMetadata if provided and not empty
     if (messageMetadata && Object.keys(messageMetadata).length > 0) {
       update.messageMetadata = messageMetadata;
@@ -722,6 +752,13 @@ function loadState() {
     }
     const channel = channels.get(channelId);
     channel.clients.set(client.clientId, ws);
+
+    // Mark this channel as visited by the user
+    if (!userChannelVisits.has(accountId)) {
+      userChannelVisits.set(accountId, new Set());
+    }
+    userChannelVisits.get(accountId).add(channelId);
+
     addChannelMessage(channel, "joined", data.message, data, signedData);
 
     // Send join confirmation with moderation rights to the user
@@ -898,7 +935,7 @@ function loadState() {
   const handleAvailableChannels = async (ws, data, signedData) => {
     const { accountId } = data.metadata;
     try {
-      const availableChannels = await getAvailableChannels(accountId, channels, wsClients);
+      const availableChannels = await getAvailableChannels(accountId, channels, wsClients, userChannelVisits);
       ws.send(
         JSON.stringify({
           type: "available_channels",

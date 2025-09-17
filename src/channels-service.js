@@ -29,8 +29,9 @@ export const getAllChannelConfigs = () => {
   return channelsConfig;
 };
 
-export const getAvailableChannels = async (accountId, channels = null, wsClients = null) => {
+export const getAvailableChannels = async (accountId, channels = null, wsClients = null, userChannelVisits = null) => {
   const availableChannels = {};
+  const userVisitedChannels = userChannelVisits?.get(accountId) || new Set();
 
   // First, add configured channels
   for (const [channelId, config] of Object.entries(channelsConfig)) {
@@ -64,11 +65,53 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
           minTipAmount: config.minTipAmount || 0.01,
           memberCount: memberCount,
           botsCount: botsCount,
-          isConfigured: true
+          isConfigured: true,
+          hasVisited: userVisitedChannels.has(channelId)
         };
       }
     } catch (error) {
       console.error(`Error evaluating rules for channel ${channelId} and user ${accountId}:`, error);
+    }
+  }
+
+  // Add previously visited channels that are still active
+  if (channels && userVisitedChannels.size > 0) {
+    for (const visitedChannelId of userVisitedChannels) {
+      // Skip if already added from configured channels
+      if (!availableChannels[visitedChannelId]) {
+        const channel = channels.get(visitedChannelId);
+        if (channel) {
+          // Count members for this channel
+          let memberCount = 0;
+          let botsCount = 0;
+
+          for (const [clientId, channelWs] of channel.clients) {
+            const clientData = wsClients?.get(channelWs);
+            if (clientData?.isBot) {
+              botsCount++;
+            } else {
+              memberCount++;
+            }
+          }
+
+          availableChannels[visitedChannelId] = {
+            name: visitedChannelId, // Use channelId as name for user-created channels
+            description: "", // Need to load description from the channel regisrty
+            isPublic: false, // User-created channels are private by default
+            defaultToken: "",
+            tokenDecimals: 24,
+            tokenSymbol: "",
+            minTipAmount: 0.01,
+            memberCount: memberCount,
+            botsCount: botsCount,
+            isConfigured: false, // Mark as user-created
+            createdBy: channel.createdBy,
+            createdAt: channel.createdAt,
+            hasVisited: true, // Always true for previously visited channels
+            isCurrentlyJoined: false // User is not currently in this channel
+          };
+        }
+      }
     }
   }
 
@@ -77,9 +120,9 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
     // Find the user's WebSocket client(s)
     for (const [ws, client] of wsClients.entries()) {
       if (client.accountId === accountId && client.channels) {
-        // Add channels the user has joined but aren't in configured channels
+        // Add channels the user has joined but aren't in configured channels or visited list
         for (const [channelId, clientChannel] of client.channels.entries()) {
-          // Skip if already added from configured channels
+          // Skip if already added from configured channels or visited channels
           if (!availableChannels[channelId]) {
             const channel = channels.get(channelId);
             if (channel) {
@@ -108,9 +151,14 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
                 botsCount: botsCount,
                 isConfigured: false, // Mark as user-created
                 createdBy: channel.createdBy,
-                createdAt: channel.createdAt
+                createdAt: channel.createdAt,
+                hasVisited: userVisitedChannels.has(channelId),
+                isCurrentlyJoined: true // User is currently in this channel
               };
             }
+          } else if (availableChannels[channelId]) {
+            // Update the isCurrentlyJoined flag if channel was already added from visited list
+            availableChannels[channelId].isCurrentlyJoined = true;
           }
         }
         // Only need to check one client per user (they should have same channels)

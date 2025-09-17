@@ -343,11 +343,11 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
     const thinkingMessage = channelHistory
       .slice(-5) // Look at last 5 messages only
       .reverse() // Start from most recent
-      .find(msg => 
-        msg.sender.accountId === BOT_ACCOUNT_ID && 
+      .find(msg =>
+        msg.sender.accountId === BOT_ACCOUNT_ID &&
         (typeof msg.message === 'string' ? msg.message : msg.message.text || '').includes('Let me think about that')
       );
-    
+
     if (thinkingMessage) {
       console.log(`Deleting thinking message with nonce: ${thinkingMessage.nonce}`);
       this.deleteMessage(channelId, thinkingMessage.nonce);
