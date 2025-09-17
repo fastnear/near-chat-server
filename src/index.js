@@ -27,6 +27,7 @@ const MAX_MESSAGE_DELAY_MS =
   parseFloat(process.env.MAX_MESSAGE_DELAY_MS) || 5000;
 const EMPTY_CHANNEL_CLEANUP_MS =
   parseFloat(process.env.EMPTY_CHANNEL_CLEANUP_MS) || 60 * 60 * 1000; // 60 minutes
+const MAX_REACTIONS_PER_USER_PER_MESSAGE = 1; // Maximum reactions one user can have on one message
 
 const ResPath = process.env.RES_PATH || "res";
 const WsSubsFilename = ResPath + "/ws_subs.json";
@@ -71,7 +72,10 @@ function saveState() {
     const channelsObj = {};
     for (const [channelId, channelData] of channels.entries()) {
       // Convert updates array to serializable messages (without signedData)
-      const messages = (channelData.updates || []).map(({ update }) => update);
+      const messages = (channelData.updates || []).map(({ update, detailedReactions }) => ({
+        ...update,
+        detailedReactions: detailedReactions || undefined
+      }));
 
       channelsObj[channelId] = {
         channelId: channelData.channelId,
@@ -146,8 +150,16 @@ function loadState() {
   if (savedState && savedState.channels) {
     for (const [channelId, channelData] of Object.entries(savedState.channels)) {
       // Convert saved messages back to updates format (without signedData)
-      const updates = (channelData.messages || []).map(update => ({
-        update,
+      const updates = (channelData.messages || []).map(savedMessage => ({
+        update: {
+          action: savedMessage.action,
+          clientIdentity: savedMessage.clientIdentity,
+          message: savedMessage.message,
+          timestampMs: savedMessage.timestampMs,
+          nonce: savedMessage.nonce,
+          messageMetadata: savedMessage.messageMetadata
+        },
+        detailedReactions: savedMessage.detailedReactions || undefined,
         signedData: null // We don't save signedData, set to null
       }));
 
@@ -579,6 +591,7 @@ function loadState() {
     message,
     clientIdentity,
     signedData,
+    messageMetadata = null,
   ) => {
     const { metadata, client } = clientIdentity;
     if (!metadata || !client) {
@@ -597,6 +610,11 @@ function loadState() {
       timestampMs: Date.now(),
       nonce: channel.nonce++,
     };
+
+    // Add messageMetadata if provided and not empty
+    if (messageMetadata && Object.keys(messageMetadata).length > 0) {
+      update.messageMetadata = messageMetadata;
+    }
     const channelId = channel.channelId;
     addGlobalMessage(channelId, update.timestampMs);
     channel.updates.push({ update, signedData });
@@ -608,15 +626,40 @@ function loadState() {
 
     channel.clients.forEach((ws, clientWs) => {
       try {
-        // Remove canDelete from real-time messages - client will calculate it
-        const messageWithPermissions = {
+        // Get client data to determine user
+        const clientData = wsClients.get(ws);
+        const userAccountId = clientData?.accountId;
+
+        // Clone update to modify for this specific client
+        const messageForClient = {
           ...update
         };
-        
+
+        // Add userReactionCounts if this message has reactions and we know the user
+        if (update.messageMetadata?.reactionCounts && userAccountId) {
+          // Find user's reactions in detailedReactions
+          const messageItem = channel.updates.find(item => item.update.nonce === update.nonce);
+          if (messageItem?.detailedReactions) {
+            const userReactions = messageItem.detailedReactions.filter(r => r.accountId === userAccountId);
+            if (userReactions.length > 0) {
+              const userReactionCounts = {};
+              for (const reaction of userReactions) {
+                userReactionCounts[reaction.emoji] = 1; // Each user can have max 1 of each emoji
+              }
+
+              // Add userReactionCounts to messageMetadata for this client
+              messageForClient.messageMetadata = {
+                ...messageForClient.messageMetadata,
+                userReactionCounts
+              };
+            }
+          }
+        }
+
         ws.send(
           JSON.stringify({
             type: "channel",
-            data: Object.assign({ channelId }, messageWithPermissions),
+            data: Object.assign({ channelId }, messageForClient),
           }),
         );
       } catch (e) {
@@ -719,7 +762,7 @@ function loadState() {
     assertValidChannelId(channelId);
     const channel = channels.get(channelId);
     validateClientChannel(client, data, channel);
-    
+
     // Validate replyTo if present
     if (data.message && typeof data.message === 'object' && data.message.replyTo) {
       const replyToNonce = data.message.replyTo;
@@ -732,8 +775,54 @@ function loadState() {
         throw new Error("Replied message not found");
       }
     }
-    
-    addChannelMessage(channel, "message", data.message, data, signedData);
+
+    // Process messageMetadata from client data
+    let messageMetadata = null;
+    if (data.messageMetadata) {
+      messageMetadata = {};
+
+      // Handle attachments
+      if (data.messageMetadata.attachments && Array.isArray(data.messageMetadata.attachments)) {
+        messageMetadata.attachments = data.messageMetadata.attachments.filter(attachment => {
+          // Validate attachment structure
+          return attachment &&
+                 typeof attachment === 'object' &&
+                 attachment.type &&
+                 attachment.url;
+        }).slice(0, 10); // Limit to maximum 10 attachments
+
+        if (messageMetadata.attachments.length === 0) {
+          delete messageMetadata.attachments;
+        } else if (data.messageMetadata.attachments.length > 10) {
+          console.log(`User ${data.metadata.accountId} tried to attach ${data.messageMetadata.attachments.length} images, limited to 10`);
+        }
+      }
+
+      // Handle isPinned
+      if (data.messageMetadata.isPinned === true) {
+        messageMetadata.isPinned = true;
+      }
+
+      // Handle reaction counts (not detailed reactions in messages)
+      if (data.messageMetadata.reactionCounts && typeof data.messageMetadata.reactionCounts === 'object') {
+        const validCounts = {};
+        for (const [emoji, count] of Object.entries(data.messageMetadata.reactionCounts)) {
+          if (typeof count === 'number' && count > 0) {
+            validCounts[emoji] = count;
+          }
+        }
+        if (Object.keys(validCounts).length > 0) {
+          messageMetadata.reactionCounts = validCounts;
+        }
+      }
+
+      // If messageMetadata is empty, set to null
+      if (Object.keys(messageMetadata).length === 0) {
+        messageMetadata = null;
+      }
+    }
+
+    addChannelMessage(channel, "message", data.message, data, signedData, messageMetadata);
   };
 
   const handleDisconnect = (ws, clientId) => {
@@ -764,16 +853,40 @@ function loadState() {
     }
     validateClientChannel(client, data, channel);
     const updates = channel.updates.slice(-MAX_HISTORY);
-    
-    // Permissions are now handled client-side
-    
+
+    // Get user accountId for userReactionCounts
+    const userAccountId = client.accountId;
+
+    // Process history to add userReactionCounts for this specific user
+    const historyWithUserReactions = updates.map(({ update, detailedReactions }) => {
+      const messageForUser = { ...update };
+
+      // Add userReactionCounts if this message has reactions and we know the user
+      if (update.messageMetadata?.reactionCounts && userAccountId && detailedReactions) {
+        const userReactions = detailedReactions.filter(r => r.accountId === userAccountId);
+        if (userReactions.length > 0) {
+          const userReactionCounts = {};
+          for (const reaction of userReactions) {
+            userReactionCounts[reaction.emoji] = 1; // Each user can have max 1 of each emoji
+          }
+
+          messageForUser.messageMetadata = {
+            ...messageForUser.messageMetadata,
+            userReactionCounts
+          };
+        }
+      }
+
+      return messageForUser;
+    });
+
     try {
       ws.send(
         JSON.stringify({
           type: "history",
           data: {
             channelId,
-            history: updates.map(({ update }) => update), // Remove canDelete from history - client will calculate it
+            history: historyWithUserReactions,
           },
         }),
       );
@@ -1253,6 +1366,275 @@ function loadState() {
     }
   };
 
+  const handleReaction = async (ws, data, signedData) => {
+    const { channelId, messageNonce, emoji, reactionAction } = data; // reactionAction: 'add' or 'remove'
+    const { accountId } = data.metadata;
+
+    console.log(`${reactionAction} reaction: ${accountId} ${reactionAction}s ${emoji} to message ${messageNonce} in ${channelId}`);
+
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    validateClientChannel(data.client, data, channel);
+
+    // Find the message to react to
+    const messageIndex = channel.updates.findIndex(item => item.update.nonce === messageNonce);
+    if (messageIndex === -1) {
+      throw new Error("Message not found");
+    }
+
+    const messageUpdate = channel.updates[messageIndex];
+
+    // Initialize messageMetadata if not exists
+    if (!messageUpdate.update.messageMetadata) {
+      messageUpdate.update.messageMetadata = {};
+    }
+
+    // Store detailed reactions separately for later retrieval
+    if (!messageUpdate.detailedReactions) {
+      messageUpdate.detailedReactions = [];
+    }
+
+    const detailedReactions = messageUpdate.detailedReactions;
+    const existingDetailedIndex = detailedReactions.findIndex(r => r.emoji === emoji && r.accountId === accountId);
+
+    if (reactionAction === 'add') {
+      if (existingDetailedIndex === -1) {
+        // Check if user already has maximum reactions on this message
+        const userReactions = detailedReactions.filter(r => r.accountId === accountId);
+
+        if (userReactions.length >= MAX_REACTIONS_PER_USER_PER_MESSAGE) {
+          // Remove oldest reaction from this user
+          const oldestReactionIndex = detailedReactions.findIndex(r => r.accountId === accountId);
+          if (oldestReactionIndex !== -1) {
+            const removedReaction = detailedReactions.splice(oldestReactionIndex, 1)[0];
+            console.log(`Removed oldest reaction ${removedReaction.emoji} from ${accountId} to add new reaction ${emoji}`);
+          }
+        }
+
+        // Add new reaction
+        detailedReactions.push({
+          emoji,
+          accountId,
+          timestampMs: Date.now()
+        });
+      }
+    } else if (reactionAction === 'remove') {
+      if (existingDetailedIndex !== -1) {
+        detailedReactions.splice(existingDetailedIndex, 1);
+      }
+    }
+
+    // Update reaction counts in messageMetadata
+    const reactionCounts = {};
+    for (const reaction of detailedReactions) {
+      if (!reactionCounts[reaction.emoji]) {
+        reactionCounts[reaction.emoji] = 0;
+      }
+      reactionCounts[reaction.emoji]++;
+    }
+
+    // Update messageMetadata with counts only
+    if (Object.keys(reactionCounts).length > 0) {
+      messageUpdate.update.messageMetadata.reactionCounts = reactionCounts;
+    } else {
+      delete messageUpdate.update.messageMetadata.reactionCounts;
+      // Remove detailedReactions if no reactions left
+      delete messageUpdate.detailedReactions;
+    }
+
+    // Remove messageMetadata if empty
+    if (Object.keys(messageUpdate.update.messageMetadata).length === 0) {
+      delete messageUpdate.update.messageMetadata;
+    }
+
+    // Broadcast reaction update to all channel members (with personalized userReactionCounts)
+    const channelForBroadcast = channels.get(channelId);
+    channelForBroadcast.clients.forEach((ws) => {
+      try {
+        // Get client data to determine user
+        const clientData = wsClients.get(ws);
+        const userAccountId = clientData?.accountId;
+
+        // Create base reaction update data
+        const reactionUpdateData = {
+          channelId,
+          messageNonce,
+          emoji,
+          reactionAction,
+          accountId,
+          reactionCounts: messageUpdate.update.messageMetadata?.reactionCounts || {}
+        };
+
+        // Add userReactionCounts if we know the user and they have reactions
+        if (userAccountId && messageUpdate.detailedReactions) {
+          const userReactions = messageUpdate.detailedReactions.filter(r => r.accountId === userAccountId);
+          if (userReactions.length > 0) {
+            const userReactionCounts = {};
+            for (const reaction of userReactions) {
+              userReactionCounts[reaction.emoji] = 1;
+            }
+            reactionUpdateData.userReactionCounts = userReactionCounts;
+          }
+        }
+
+        ws.send(JSON.stringify({
+          type: "reaction_update",
+          data: reactionUpdateData
+        }));
+      } catch (e) {
+        console.log("Failed to broadcast reaction update to client", e);
+      }
+    });
+  };
+
+  const handlePinMessage = async (ws, data, signedData) => {
+    const { channelId, messageNonce, isPinned } = data;
+    const { accountId } = data.metadata;
+
+    console.log(`${isPinned ? 'Pin' : 'Unpin'} message: ${accountId} ${isPinned ? 'pins' : 'unpins'} message ${messageNonce} in ${channelId}`);
+
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel not found");
+    }
+
+    // Check if user has permission to pin messages (admin or channel creator)
+    const channelConfig = getChannelConfig(channelId);
+    const isChannelModerator = (channelConfig && channelConfig.adminUsers && channelConfig.adminUsers.includes(accountId)) ||
+                               channel.createdBy === accountId;
+
+    if (!isChannelModerator) {
+      throw new Error("Permission denied: only channel moderators can pin/unpin messages");
+    }
+
+    // Find the message to pin/unpin
+    const messageIndex = channel.updates.findIndex(item => item.update.nonce === messageNonce);
+    if (messageIndex === -1) {
+      throw new Error("Message not found");
+    }
+
+    const messageUpdate = channel.updates[messageIndex];
+
+    // Initialize messageMetadata if not exists
+    if (!messageUpdate.update.messageMetadata) {
+      messageUpdate.update.messageMetadata = {};
+    }
+
+    if (isPinned) {
+      messageUpdate.update.messageMetadata.isPinned = true;
+    } else {
+      delete messageUpdate.update.messageMetadata.isPinned;
+    }
+
+    // Remove messageMetadata if empty
+    if (Object.keys(messageUpdate.update.messageMetadata).length === 0) {
+      delete messageUpdate.update.messageMetadata;
+    }
+
+    // Broadcast pin update to all channel members
+    broadcastToChannel(channelId, {
+      type: "pin_update",
+      data: {
+        channelId,
+        messageNonce,
+        isPinned,
+        pinnedBy: accountId
+      }
+    });
+  };
+
+  const handlePinnedMessages = async (ws, data, signedData) => {
+    const client = data.client;
+    const channelId = data.channelId;
+    assertValidChannelId(channelId);
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel doesn't exist");
+    }
+    validateClientChannel(client, data, channel);
+
+    // Get user accountId for userReactionCounts
+    const userAccountId = client.accountId;
+
+    // Get all pinned messages with userReactionCounts
+    const pinnedMessagesWithUserReactions = channel.updates
+      .filter(({ update }) => update.messageMetadata && update.messageMetadata.isPinned)
+      .map(({ update, detailedReactions }) => {
+        const messageForUser = { ...update };
+
+        // Add userReactionCounts if this message has reactions and we know the user
+        if (update.messageMetadata?.reactionCounts && userAccountId && detailedReactions) {
+          const userReactions = detailedReactions.filter(r => r.accountId === userAccountId);
+          if (userReactions.length > 0) {
+            const userReactionCounts = {};
+            for (const reaction of userReactions) {
+              userReactionCounts[reaction.emoji] = 1; // Each user can have max 1 of each emoji
+            }
+
+            messageForUser.messageMetadata = {
+              ...messageForUser.messageMetadata,
+              userReactionCounts
+            };
+          }
+        }
+
+        return messageForUser;
+      });
+
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "pinned_messages",
+          data: {
+            channelId,
+            pinnedMessages: pinnedMessagesWithUserReactions,
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send pinned messages", e);
+    }
+  };
+
+  const handleReactionDetails = async (ws, data, signedData) => {
+    const client = data.client;
+    const channelId = data.channelId;
+    const messageNonce = data.messageNonce;
+
+    assertValidChannelId(channelId);
+    const channel = channels.get(channelId);
+    if (!channel) {
+      throw new Error("Channel doesn't exist");
+    }
+    validateClientChannel(client, data, channel);
+
+    // Find the message
+    const messageUpdate = channel.updates.find(item => item.update.nonce === messageNonce);
+    if (!messageUpdate) {
+      throw new Error("Message not found");
+    }
+
+    const detailedReactions = messageUpdate.detailedReactions || [];
+
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "reaction_details",
+          data: {
+            channelId,
+            messageNonce,
+            reactions: detailedReactions,
+          },
+        }),
+      );
+    } catch (e) {
+      console.log("Failed to send reaction details", e);
+    }
+  };
+
   wss.on("connection", (ws, req) => {
     const clientId = uuidv4();
     console.log("WS Connection open", clientId);
@@ -1315,6 +1697,18 @@ function loadState() {
             break;
           case "deposit_request":
             await handleDepositRequest(ws, data, signedData);
+            break;
+          case "reaction":
+            await handleReaction(ws, data, signedData);
+            break;
+          case "pin_message":
+            await handlePinMessage(ws, data, signedData);
+            break;
+          case "pinned_messages":
+            await handlePinnedMessages(ws, data, signedData);
+            break;
+          case "reaction_details":
+            await handleReactionDetails(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");
