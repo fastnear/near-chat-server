@@ -31,7 +31,7 @@ export const getAllChannelConfigs = () => {
 
 export const getAvailableChannels = async (accountId, channels = null, wsClients = null) => {
   const availableChannels = {};
-  
+
   // First, add configured channels
   for (const [channelId, config] of Object.entries(channelsConfig)) {
     try {
@@ -71,10 +71,54 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
       console.error(`Error evaluating rules for channel ${channelId} and user ${accountId}:`, error);
     }
   }
-  
-  // User-created channels are private and not shown in the general list
-  // They can only be accessed by direct join
-  
+
+  // Add user-created channels that the user has joined in current session
+  if (wsClients && channels) {
+    // Find the user's WebSocket client(s)
+    for (const [ws, client] of wsClients.entries()) {
+      if (client.accountId === accountId && client.channels) {
+        // Add channels the user has joined but aren't in configured channels
+        for (const [channelId, clientChannel] of client.channels.entries()) {
+          // Skip if already added from configured channels
+          if (!availableChannels[channelId]) {
+            const channel = channels.get(channelId);
+            if (channel) {
+              // Count members for user-created channel
+              let memberCount = 0;
+              let botsCount = 0;
+
+              for (const [clientId, channelWs] of channel.clients) {
+                const clientData = wsClients.get(channelWs);
+                if (clientData?.isBot) {
+                  botsCount++;
+                } else {
+                  memberCount++;
+                }
+              }
+
+              availableChannels[channelId] = {
+                name: channelId, // Use channelId as name for user-created channels
+                description: `User-created channel`,
+                isPublic: false, // User-created channels are private by default
+                defaultToken: "",
+                tokenDecimals: 24,
+                tokenSymbol: "",
+                minTipAmount: 0.01,
+                memberCount: memberCount,
+                botsCount: botsCount,
+                isConfigured: false, // Mark as user-created
+                createdBy: channel.createdBy,
+                createdAt: channel.createdAt
+              };
+            }
+          }
+        }
+        // Only need to check one client per user (they should have same channels)
+        break;
+      }
+    }
+  }
+
   return availableChannels;
 };
 

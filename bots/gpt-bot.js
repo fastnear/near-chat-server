@@ -123,12 +123,33 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
     });
   }
 
-  async callOpenAI(prompt) {
+  async callOpenAI(prompt, contextMessages = []) {
     if (!OPENAI_API_KEY) {
-      return "❌ OpenAI API key not configured. Please set OPENAI_API_KEY in .env file.";
+      return "OpenAI API key not configured. Please set OPENAI_API_KEY in .env file.";
     }
 
     try {
+      const messages = [
+        {
+          role: "system",
+          content: "You are a helpful assistant in a NEAR Protocol chat. Keep responses concise and friendly. Focus on NEAR ecosystem, blockchain, and general tech questions. IMPORTANT: Do not use markdown formatting, asterisks, or any markup. Write only plain text responses."
+        }
+      ];
+
+      // Add context messages if provided
+      for (const contextMsg of contextMessages) {
+        messages.push({
+          role: contextMsg.role || "user",
+          content: contextMsg.content
+        });
+      }
+
+      // Add the current prompt
+      messages.push({
+        role: "user",
+        content: prompt
+      });
+
       const response = await fetch(`${OPENAI_ENDPOINT}chat/completions`, {
         method: "POST",
         headers: {
@@ -137,16 +158,7 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
         },
         body: JSON.stringify({
           model: MODEL_NAME,
-          messages: [
-            {
-              role: "system",
-              content: "You are a helpful assistant in a NEAR Protocol chat. Keep responses concise and friendly. Focus on NEAR ecosystem, blockchain, and general tech questions."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
+          messages: messages,
           max_tokens: MAX_TOKENS,
           temperature: 0.7,
         }),
@@ -160,7 +172,7 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
       return data.choices[0]?.message?.content || "Sorry, I couldn't generate a response.";
     } catch (error) {
       console.error("OpenAI API error:", error);
-      return `❌ Error: ${error.message}`;
+      return `Error: ${error.message}`;
     }
   }
 
@@ -223,46 +235,67 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
   }
 
   async processGPTCommand(channelId, message, sender, currentMessageNonce) {
+    let contextMessages = [];
+    let finalPrompt = message;
+
     // Check if message is a reply
     if (typeof message === 'object' && message.replyTo && message.text) {
       // Find the original message being replied to
       const channelHistory = this.messageHistory.get(channelId) || [];
       const originalMessage = channelHistory.find(msg => msg.nonce === message.replyTo);
-      
-      // Check if replying to this bot's message - auto-respond
-      if (originalMessage && originalMessage.sender.accountId === BOT_ACCOUNT_ID) {
-        console.log(`Reply to GPT Bot from ${sender.accountId}: ${message.text}`);
-        
-        const response = await this.callOpenAI(message.text);
-        this.sendGPTMessage(
-          channelId,
-          `🤖 **GPT Response to ${sender.accountId}:**\n\n${response}`,
-          currentMessageNonce
-        );
-        return;
+
+      if (originalMessage) {
+        // Add original message as context
+        const originalText = typeof originalMessage.message === 'string'
+          ? originalMessage.message
+          : originalMessage.message.text || '';
+
+        // Check if replying to this bot's message - auto-respond with context
+        if (originalMessage.sender.accountId === BOT_ACCOUNT_ID) {
+          console.log(`Reply to GPT Bot from ${sender.accountId}: ${message.text}`);
+
+          contextMessages.push({
+            role: "assistant",
+            content: originalText.replace(/^🤖\s*/, '').replace(/\*\*.*?\*\*\s*/, '') // Clean up bot formatting
+          });
+
+          const response = await this.callOpenAI(message.text, contextMessages);
+          this.sendGPTMessage(
+            channelId,
+            `${response}`,
+            currentMessageNonce
+          );
+          return;
+        } else {
+          // Replying to someone else's message - include it as context
+          contextMessages.push({
+            role: "user",
+            content: `Previous message from ${originalMessage.sender.accountId}: ${originalText}`
+          });
+        }
       }
-      
-      // For other replies, process normally with the text
-      message = message.text;
+
+      // Use the reply text as the final prompt
+      finalPrompt = message.text;
     }
     
-    const lowerMessage = (typeof message === 'string' ? message : '').toLowerCase().trim();
-    
+    const lowerMessage = (typeof finalPrompt === 'string' ? finalPrompt : '').toLowerCase().trim();
+
     if (!lowerMessage) return;
-    
+
     // Check for GPT commands: /ask <question>, /gpt <question>
-    const askMatch = message.match(/^\/(?:ask|gpt)\s+(.+)$/i);
-    
+    const askMatch = finalPrompt.match(/^\/(?:ask|gpt)\s+(.+)$/i);
+
     if (askMatch) {
       const question = askMatch[1].trim();
       console.log(`GPT command from ${sender.accountId}: ${question}`);
-      
-      this.sendGPTMessage(channelId, `🤖 Processing your question: "${question}"...`, currentMessageNonce);
-      
-      const response = await this.callOpenAI(question);
+
+      this.sendGPTMessage(channelId, `Processing your question: "${question}"...`, currentMessageNonce);
+
+      const response = await this.callOpenAI(question, contextMessages);
       this.sendGPTMessage(
         channelId,
-        `🤖 **GPT Response to ${sender.accountId}:**\n\n${response}`,
+        response,
         currentMessageNonce
       );
       return;
@@ -270,33 +303,33 @@ const keyPair = getKeyPairFromPrivateKey(BOT_PRIVATE_KEY);
 
     // Check for mentions: @gpt, @chatgpt, @ai
     if (lowerMessage.includes("@gpt") || lowerMessage.includes("@chatgpt") || lowerMessage.includes("@ai")) {
-      console.log(`GPT mention from ${sender.accountId}: ${message}`);
-      
+      console.log(`GPT mention from ${sender.accountId}: ${finalPrompt}`);
+
       // Extract the question (remove the mention)
-      const question = message.replace(/@(gpt|chatgpt|ai)/gi, "").trim();
-      
+      const question = finalPrompt.replace(/@(gpt|chatgpt|ai)/gi, "").trim();
+
       if (question.length < 3) {
         this.sendGPTMessage(
           channelId,
-          `🤖 Hi ${sender.accountId}! Ask me a question using "/ask <your question>" or mention me with @gpt followed by your question.`,
+          `Hi ${sender.accountId}! Ask me a question using "/ask <your question>" or mention me with @gpt followed by your question.`,
           currentMessageNonce
         );
         return;
       }
-      
+
       // Send thinking message and save reference for later deletion
-      const thinkingMessage = `🤖 Let me think about that...`;
+      const thinkingMessage = `Let me think about that...`;
       this.sendGPTMessage(channelId, thinkingMessage, currentMessageNonce);
-      
-      const response = await this.callOpenAI(question);
-      
+
+      const response = await this.callOpenAI(question, contextMessages);
+
       // Send real response
       this.sendGPTMessage(
         channelId,
-        `🤖 **@${sender.accountId}** ${response}`,
+        `@${sender.accountId} ${response}`,
         currentMessageNonce
       );
-      
+
       // Delete the thinking message by finding it in message history
       setTimeout(() => {
         this.deleteThinkingMessage(channelId, thinkingMessage);

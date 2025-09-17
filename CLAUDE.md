@@ -49,7 +49,7 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 
 ### Key Features
 - **NEAR Authentication** - Messages signed with NEAR account keys
-- **Channel Access Control** - Rule-based channel permissions
+- **Channel Access Control** - Rule-based channel permissions, user-created private channels
 - **Message Threading** - Reply-to functionality with message nonces
 - **Message Deletion** - Users can delete own messages, admins can delete any
 - **Bot Integration** - Pluggable bot system with process management
@@ -61,6 +61,7 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 - `history` - Request message history
 - `members` - Request channel members
 - `delete_message` - Delete message (with permissions)
+- `available_channels` - Get list of available channels (includes both configured channels user can access and user-created channels they've joined)
 
 ### Environment Variables
 - `WS_PORT` - WebSocket server port (default: 7071)
