@@ -3,17 +3,17 @@
 # Start GPT Bot for NEAR Chat Server
 echo "Starting GPT Bot..."
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "⚠️  .env file not found. Please run start-tip-bot.sh first to create template."
+# Check if bot .env file exists
+if [ ! -f bots/gpt-bot/.env ]; then
+    echo "⚠️  GPT bot .env file not found."
     exit 1
 fi
 
 # Check if OpenAI API key is configured
-if ! grep -q "OPENAI_API_KEY=.*[^=]$" .env; then
-    echo "❌ OPENAI_API_KEY not configured in .env file"
+if ! grep -q "OPENAI_API_KEY=.*[^=]$" bots/gpt-bot/.env; then
+    echo "❌ OPENAI_API_KEY not configured in bots/gpt-bot/.env file"
     echo "💡 Get your API key from: https://platform.openai.com/api-keys"
-    echo "💡 Then edit .env and set: OPENAI_API_KEY=your_key_here"
+    echo "💡 Then edit bots/gpt-bot/.env and set: OPENAI_API_KEY=your_key_here"
     exit 1
 fi
 
@@ -31,4 +31,4 @@ echo "✅ Server is running"
 echo "🚀 Starting GPT Bot..."
 echo "💬 Try: /ask What is NEAR Protocol?"
 echo "💬 Or mention: @gpt tell me about blockchain"
-node bots/gpt-bot.js
+cd bots/gpt-bot && node index.js

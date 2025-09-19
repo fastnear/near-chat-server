@@ -1,0 +1,28 @@
+{
+  "tip-bot": {
+    "name": "Tip Bot",
+    "displayName": "@tipbot",
+    "accountId": "tipbot.near",
+    "channels": ["general", "developers"],
+    "filters": {
+      "commands": ["/tip"],
+      "mentions": ["@tipbot"]
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": true,
+    "allowedServerEvents": ["tip_status_update", "storage_required", "intent_created"]
+  },
+  "gpt-bot": {
+    "name": "GPT Assistant",
+    "displayName": "@ai",
+    "accountId": "ai-is-near.near",
+    "channels": ["general", "developers", "ai-bot-admin", "memecoins"],
+    "filters": {
+      "commands": ["/ask", "/gpt"],
+      "mentions": ["@gpt", "@ai"]
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": ["channel_activity"]
+  }
+}

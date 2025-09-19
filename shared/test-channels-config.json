@@ -1,0 +1,27 @@
+{
+    "testnet-public-channel": {
+    "name": "Testnet Channel",
+    "description": "Public chat for Testnet",
+    "isPublic": true,
+    "showInDiscovery": false,
+    "rules": [],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "adminUsers": ["alice.testnet"]
+  },  
+  "testnet-private-channel": {
+    "name": "Testnet Private Channel",
+    "description": "Private chat for Testnet",
+    "isPublic": false,
+    "showInDiscovery": false,
+    "rules": [{
+        "type": "whitelist",
+        "accounts": ["private.testnet"]
+      }],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "adminUsers": ["private.testnet"]
+  }
+}

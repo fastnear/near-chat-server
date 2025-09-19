@@ -76,5 +76,19 @@
     "tokenSymbol": "",
     "tokenDecimals": 24,
     "adminUsers": ["vadim.near", "mob.near"]
-  }
+  },
+  "ai-bot-admin": {
+    "name": "Admin AI bot",
+    "description": "Manage AI bot here",
+    "isPublic": false,
+    "showInDiscovery": false,
+    "rules": [{
+        "type": "whitelist",
+        "accounts": ["ai-is-near.near", "zavodil.near"]
+      }],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "adminUsers": ["zavodil.near"]
+  } 
 }

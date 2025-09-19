@@ -3,7 +3,7 @@ dotenv.config();
 import fs from "fs";
 import Denque from "denque";
 import { v4 as uuidv4 } from "uuid";
-import { saveJson, loadJson, isString } from "./utils.js";
+import { saveJson, loadJson, isString } from "../shared/utils.js";
 import {
   isValidAccountId,
   verifySignature,
@@ -13,12 +13,13 @@ import {
   derivePublicKeyFromImplicitAccountId,
   fetchAndCacheAccessKey,
   checkStorageBalance,
-} from "./near.js";
+} from "../shared/near.js";
 import { WebSocketServer } from "ws";
 import { loadChannelsConfig, getAvailableChannels, canUserAccessChannel, getChannelConfig } from "./channels-service.js";
 import { loadBotsConfig, isValidBot, getBotsForMessage, getBotConfig, getAllBotsConfig } from "./bots-service.js";
-import { getKeyPairFromPrivateKey, getPublicKeyFromKeyPair } from "../src/near.js";
-import BotManager from "./bot-manager.js";
+import { getKeyPairFromPrivateKey, signMessage, getPublicKeyFromKeyPair } from "../shared/near.js";
+import { ServerEventSystem } from "./server-events.js";
+import { configManager } from "../shared/config-manager.js";
 
 const MAX_HISTORY = 1000;
 const MAX_CHANNEL_LENGTH = 64;
@@ -28,6 +29,8 @@ const MAX_MESSAGE_DELAY_MS =
 const EMPTY_CHANNEL_CLEANUP_MS =
   parseFloat(process.env.EMPTY_CHANNEL_CLEANUP_MS) || 12 * 60 * 60 * 1000; // 12 hours
 const MAX_REACTIONS_PER_USER_PER_MESSAGE = 1; // Maximum reactions one user can have on one message
+
+const SERVER_SIGNATURE_CONTRACT_ID = process.env.SERVER_SIGNATURE_CONTRACT_ID || "social.near";
 
 const ResPath = process.env.RES_PATH || "res";
 const WsSubsFilename = ResPath + "/ws_subs.json";
@@ -49,7 +52,7 @@ function assertValidChannelId(channelId) {
     throw new Error("Channel name cannot start or end with spaces");
   }
   if (channelId.length < 2) {
-    throw new Error("Channel name must be at least 2 characters long");
+    throw new Error(`ChannelId "${channelId}" must be at least 2 characters long`);
   }
   if (channelId.length > MAX_CHANNEL_LENGTH) {
     throw new Error(`Channel name is longer than ${MAX_CHANNEL_LENGTH} characters`);
@@ -137,6 +140,19 @@ function loadState() {
 }
 
 (async () => {
+  // Validate critical environment variables for money operations
+  const requiredEnvVars = [
+    'SERVER_ACCOUNT_ID',
+    'SERVER_PRIVATE_KEY',
+    'INTENTS_CONTRACT_ID'
+  ];
+
+  for (const envVar of requiredEnvVars) {
+    if (!process.env[envVar]) {
+      throw new Error(`Required environment variable ${envVar} is not set`);
+    }
+  }
+
   if (!fs.existsSync(ResPath)) {
     fs.mkdirSync(ResPath);
   }
@@ -213,7 +229,7 @@ function loadState() {
         data: {
           intentId,
           status: "timeout",
-          message: `⏰ Tip from ${intentData.requester} to ${intentData.recipient} (${intentData.amount} ${intentData.token || 'wrap.near'}) expired after 5 minutes`
+          message: `⏰ Tip from ${intentData.requester} to ${intentData.recipient} (${intentData.amount} ${intentData.token}) expired after 5 minutes`
         }
       });
     });
@@ -260,178 +276,20 @@ function loadState() {
   loadChannelsConfig();
 
   // Function to check intent settlement status (like Python get_intent_settled_status)
-  const checkIntentStatus = async (intentHash, pendingIntent, intentId) => {
-    const data = {
-      id: 1,
-      jsonrpc: "2.0",
-      method: "get_status",
-      params: [
-        {
-          intent_hash: intentHash
-        }
-      ]
-    };
-
-    const startTime = Date.now();
-    const maxWaitTime = 30000; // 30 seconds like Python code
-    
-    const checkStatus = async () => {
-      try {
-        const response = await fetch("https://solver-relay-v2.chaindefuser.com/rpc", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(data)
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.result.status === "SETTLED") {
-          console.log("Success! Intent settled");
-          
-          // Get transaction hash from data.hash field
-          const transactionHash = result.result.data?.hash || intentHash;
-          
-          console.log("Transaction hash:", transactionHash);
-          
-          // Send success status
-          broadcastToChannel(pendingIntent.channelId, {
-            type: "tip_status", 
-            data: {
-              intentId: intentId,
-              status: "success",
-              from: pendingIntent.requester,
-              to: pendingIntent.recipient,
-              amount: pendingIntent.amount,
-              humanAmount: pendingIntent.humanAmount,
-              token: pendingIntent.token,
-              transactionHash: transactionHash,
-              message: `✅ ${pendingIntent.requester} tipped ${pendingIntent.recipient} ${pendingIntent.humanAmount || pendingIntent.amount} ${pendingIntent.tokenSymbol}`
-            }
-          });
-          
-          // Send notification to tip-bot to post success message
-          for (const [clientWs, client] of wsClients.entries()) {
-            if (client.isBot && client.botId === "tip-bot") {
-              try {
-                clientWs.send(JSON.stringify({
-                  type: "tip_success",
-                  data: {
-                    channelId: pendingIntent.channelId,
-                    requester: pendingIntent.requester,
-                    recipient: pendingIntent.recipient,
-                    humanAmount: pendingIntent.humanAmount || pendingIntent.amount,
-                    tokenSymbol: pendingIntent.tokenSymbol,
-                    transactionHash,
-                    replyToNonce: pendingIntent.replyToNonce
-                  }
-                }));
-                console.log("Sent tip success notification to tip-bot");
-                break;
-              } catch (e) {
-                console.error("Failed to send tip success notification to tip-bot:", e);
-              }
-            }
-          }
-          
-          // Clean up processed intent
-          pendingIntents.delete(intentId);
-          return;
-          
-        } else if (result.result.status === "NOT_FOUND_OR_NOT_VALID_ANYMORE" || 
-                   result.result.status === "NOT_FOUND_OR_NOT_VALID") {
-          console.log("Intent not found or not valid anymore");
-          
-          // Send error status
-          broadcastToChannel(pendingIntent.channelId, {
-            type: "tip_status",
-            data: {
-              intentId: intentId,
-              status: "error",
-              from: pendingIntent.requester,
-              to: pendingIntent.recipient,
-              amount: pendingIntent.amount,
-              humanAmount: pendingIntent.humanAmount,
-              token: pendingIntent.token,
-              message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: Intent not found or invalid`
-            }
-          });
-          
-          // Clean up failed intent
-          pendingIntents.delete(intentId);
-          return;
-          
-        } else if (Date.now() - startTime > maxWaitTime) {
-          console.log("Timeout: Intent settlement took longer than 30 seconds");
-          
-          // Send timeout status  
-          broadcastToChannel(pendingIntent.channelId, {
-            type: "tip_status",
-            data: {
-              intentId: intentId,
-              status: "timeout",
-              from: pendingIntent.requester,
-              to: pendingIntent.recipient,
-              amount: pendingIntent.amount,
-              humanAmount: pendingIntent.humanAmount,
-              token: pendingIntent.token,
-              message: `⏰ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} is taking longer than expected`
-            }
-          });
-          
-          // Clean up timed out intent
-          pendingIntents.delete(intentId);
-          return;
-        }
-        
-        // Still processing, check again in 200ms
-        setTimeout(checkStatus, 200);
-        
-      } catch (error) {
-        console.error("Error checking intent status:", error);
-        
-        // Send error status
-        broadcastToChannel(pendingIntent.channelId, {
-          type: "tip_status",
-          data: {
-            intentId: intentId,
-            status: "error",
-            from: pendingIntent.requester,
-            to: pendingIntent.recipient,
-            amount: pendingIntent.amount,
-            humanAmount: pendingIntent.humanAmount,
-            token: pendingIntent.token,
-            message: `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: ${error.message}`
-          }
-        });
-        
-        // Clean up failed intent
-        pendingIntents.delete(intentId);
-      }
-    };
-    
-    // Start checking status
-    setTimeout(checkStatus, 200);
-  };
 
   // Function to check if user can delete message
-  const canUserDeleteMessage = (messageAuthor, currentUser, channelId) => {
+  const canUserDeleteMessage = async (messageAuthor, currentUser, channelId) => {
     // User can delete their own messages
     if (messageAuthor === currentUser) {
       return true;
     }
-    
+
     // Check if user is admin of the channel
-    const channelConfig = getChannelConfig(channelId);
+    const channelConfig = await getChannelConfig(channelId);
     if (channelConfig?.adminUsers?.includes(currentUser)) {
       return true;
     }
-    
+
     return false;
   };
 
@@ -456,7 +314,7 @@ function loadState() {
     const messageAuthor = messageToDelete.update.clientIdentity.accountId;
     
     // Check permissions
-    if (!canUserDeleteMessage(messageAuthor, accountId, channelId)) {
+    if (!(await canUserDeleteMessage(messageAuthor, accountId, channelId))) {
       throw new Error("Permission denied: cannot delete this message");
     }
     
@@ -476,7 +334,12 @@ function loadState() {
     console.log(`Message ${messageNonce} deleted by ${accountId}`);
   };
 
-  const botManager = new BotManager();
+  // Initialize Server Event System
+  const serverEventSystem = new ServerEventSystem(
+    process.env.SERVER_ACCOUNT_ID,
+    process.env.SERVER_PRIVATE_KEY
+  );
+  serverEventSystem.setWSClients(wsClients);
 
   // console.log(
   //   JSON.stringify(
@@ -491,6 +354,12 @@ function loadState() {
   const wss = new WebSocketServer({ port: WS_PORT });
   console.log("WebSocket server listening on http://localhost:%d/", WS_PORT);
 
+  // Broadcast server startup to connected bots after a short delay
+  setTimeout(async () => {
+    console.log("🚀 Broadcasting server startup to connected bots...");
+    await serverEventSystem.broadcastServerStartup();
+  }, 3000);
+
   // WebSocket heartbeat to prevent disconnections
   const heartbeat = setInterval(() => {
     wss.clients.forEach(ws => {
@@ -504,11 +373,6 @@ function loadState() {
     });
   }, 30000); // every 30 seconds
 
-  // Start all bots after server is ready
-  setTimeout(() => {
-    console.log("🤖 Starting all enabled bots...");
-    botManager.startAllBots();
-  }, 2000);
 
   const validateDataAndSignature = async ({ signature, serializedData }) => {
     const data = JSON.parse(serializedData);
@@ -534,7 +398,7 @@ function loadState() {
     ) {
       throw new Error("Invalid timestamp");
     }
-    verifySignature(publicKey, signature, serializedData);
+    await verifySignature(publicKey, signature, serializedData);
     data.publicKey = keyToString(keyFromString(publicKey));
     if (contractId === null) {
       // It's a full access key
@@ -645,14 +509,16 @@ function loadState() {
     if (messageMetadata && Object.keys(messageMetadata).length > 0) {
       update.messageMetadata = messageMetadata;
     }
-    const channelId = channel.channelId;
-    addGlobalMessage(channelId, update.timestampMs);
+    const channelId = channel.channelId;    
     channel.updates.push({ update, signedData });
 
     // Update last activity time for user-created channels
     if (channel.createdBy) {
       channel.lastActiveAt = Date.now();
     }
+
+    // Return the nonce of the created message
+    const createdMessageNonce = update.nonce;
 
     channel.clients.forEach((ws, clientWs) => {
       try {
@@ -696,6 +562,9 @@ function loadState() {
         console.log("Failed to send update to ws", e);
       }
     });
+
+    // Return the nonce of the created message
+    return createdMessageNonce;
   };
 
   const handleJoin = async (ws, req, data, signedData) => {
@@ -714,7 +583,7 @@ function loadState() {
     }
     
     // Check if channel exists in config - if yes, validate access
-    const channelConfig = getChannelConfig(channelId);
+    const channelConfig = await getChannelConfig(channelId);
     
     // Bot skips the access check
     if (!client.isBot) {
@@ -745,10 +614,6 @@ function loadState() {
 
       console.log(`📝 User-created channel "${channelId}" created by ${accountId}`);
 
-      // Start bots for this channel if it's newly created
-      setTimeout(() => {
-        botManager.startBotsForChannel(channelId);
-      }, 1000);
     }
     const channel = channels.get(channelId);
     channel.clients.set(client.clientId, ws);
@@ -859,7 +724,20 @@ function loadState() {
       }
     }
 
-    addChannelMessage(channel, "message", data.message, data, signedData, messageMetadata);
+    const messageNonce = addChannelMessage(channel, "message", data.message, data, signedData, messageMetadata);
+
+    // Send confirmation with nonce back to sender (especially useful for bots)
+    try {
+      ws.send(JSON.stringify({
+        type: "message_created",
+        data: {
+          channelId: data.channelId,
+          nonce: messageNonce
+        }
+      }));
+    } catch (e) {
+      console.error("Failed to send message_created confirmation:", e);
+    }
   };
 
   const handleDisconnect = (ws, clientId) => {
@@ -949,27 +827,34 @@ function loadState() {
     }
   };
 
-  const handleRegisterBot = (ws, data, signedData) => {
+  const handleRegisterBot = async (ws, data, signedData) => {
     const { accountId } = data.metadata;
     const client = data.client;
     const botId = data.botId; // Get botId from request
-    
-    if (!isValidBot(accountId)) {
+
+    if (!(await isValidBot(accountId))) {
       throw new Error("Bot not authorized");
     }
-    
+
     // Verify botId matches config
-    const botConfig = getBotConfig(botId);
+    const botConfig = await getBotConfig(botId);
     if (!botConfig || botConfig.accountId !== accountId) {
       throw new Error(`Bot ID ${botId} doesn't match account ${accountId}`);
     }
-    
+
+    // Check if bot with this accountId is already connected
+    for (const [existingWs, existingClient] of wsClients.entries()) {
+      if (existingClient.isBot && existingClient.botAccountId === accountId && existingWs !== ws) {
+        throw new Error(`Bot with account ${accountId} is already connected`);
+      }
+    }
+
     client.isBot = true;
     client.botAccountId = accountId;
     client.botId = botId;
-    
+
     console.log(`Bot registered: ${accountId} (${botId})`);
-    
+
     try {
       ws.send(
         JSON.stringify({
@@ -983,6 +868,56 @@ function loadState() {
     } catch (e) {
       console.log("Failed to send bot registration confirmation", e);
     }
+
+    // Send server identity to bot
+    try {
+      ws.send(JSON.stringify({
+        type: "server_identity",
+        data: {
+          serverAccountId: process.env.SERVER_ACCOUNT_ID,
+          serverPublicKey: getPublicKeyFromKeyPair(getKeyPairFromPrivateKey(process.env.SERVER_PRIVATE_KEY))
+        }
+      }));
+    } catch (e) {
+      console.log("Failed to send server identity", e);
+    }
+
+    // Send startup notification to this specific bot
+    setTimeout(async () => {
+      console.log(`🚀 Sending startup notification to bot ${botId}...`);
+
+      const startupData = {
+        action: "server_startup",
+        eventType: "server_started",
+        payload: {
+          timestamp: Date.now(),
+          serverAccountId: process.env.SERVER_ACCOUNT_ID,
+          botChannels: botConfig.channels || []
+        },
+        metadata: {
+          accountId: process.env.SERVER_ACCOUNT_ID,
+          contractId: SERVER_SIGNATURE_CONTRACT_ID,
+          publicKey: getPublicKeyFromKeyPair(getKeyPairFromPrivateKey(process.env.SERVER_PRIVATE_KEY)),
+          timestampMs: Date.now()
+        }
+      };
+
+      const serializedData = JSON.stringify(startupData);
+      const serverKeyPair = getKeyPairFromPrivateKey(process.env.SERVER_PRIVATE_KEY);
+      const signature = await signMessage(serializedData, serverKeyPair);
+
+      const signedEvent = {
+        signature,
+        serializedData
+      };
+
+      try {
+        ws.send(JSON.stringify(signedEvent));
+        console.log(`✅ Sent startup notification to bot ${botId}`);
+      } catch (e) {
+        console.error(`❌ Failed to send startup notification to bot ${botId}:`, e);
+      }
+    }, 500); // Небольшая задержка чтобы бот успел обработать server_identity
   };
 
   const handleMembers = async (ws, data, signedData) => {
@@ -1014,7 +949,7 @@ function loadState() {
           
           // For bots, use displayName from config if available
           if (clientData.isBot && clientData.botAccountId) {
-            const botConfig = getBotConfig(clientData.botId || 'unknown');
+            const botConfig = await getBotConfig(clientData.botId || 'unknown');
             if (botConfig && botConfig.displayName) {
               displayName = botConfig.displayName;
             }
@@ -1050,11 +985,115 @@ function loadState() {
     }
   };
 
+  const handleRequestTipIntent = async (ws, data, signedData) => {
+    const { channelId, intentId, recipient, amount, humanAmount, originalMessage, requester, replyTo, token } = data;
+    const { accountId } = data.metadata;
+    const client = wsClients.get(ws);
+
+    // Only bots can request tip intents
+    if (!client?.isBot) {
+      throw new Error("Only bots can request tip intents");
+    }
+
+    // Validate required fields for money operations - strict validation for financial operations
+    if (!token || typeof token !== 'string' || token.trim() === '') {
+      throw new Error("Token field must be a non-empty string for tip intents");
+    }
+    if (!amount || typeof amount !== 'string' || amount.trim() === '') {
+      throw new Error("Amount field must be a non-empty string for tip intents");
+    }
+    if (!recipient || typeof recipient !== 'string' || recipient.trim() === '') {
+      throw new Error("Recipient field must be a non-empty string for tip intents");
+    }
+
+    // Tip intent requested - verbose logging removed
+
+    // Store the pending intent
+    const pendingIntent = {
+      intentId,
+      channelId,
+      recipient,
+      amount,
+      humanAmount,
+      originalMessage,
+      requester,
+      replyTo, // nonce of original message to reply to
+      token, // add token field to pending intent
+      timestamp: Date.now(),
+      status: 'pending'
+    };
+
+    pendingIntents.set(intentId, pendingIntent);
+
+    // Send confirmation back to bot
+    try {
+      ws.send(JSON.stringify({
+        type: "tip_intent_requested",
+        data: {
+          intentId,
+          status: "pending",
+          message: `Tip intent created: ${humanAmount} to ${recipient}`
+        }
+      }));
+    } catch (e) {
+      console.error("Failed to send tip intent confirmation:", e);
+    }
+
+    // Find the requester (user who requested the tip) and send them signing request
+    const requesterClient = [...wsClients.entries()].find(([ws, client]) => {
+      return client.accountId === requester;
+    });
+
+    if (requesterClient) {
+      const [requesterWs] = requesterClient;
+
+      try {
+        requesterWs.send(JSON.stringify({
+          type: "sign_intent",
+          data: {
+            intentId,
+            channelId,
+            recipient,
+            amount,
+            humanAmount,
+            token
+          }
+        }));
+        // Signing request sent
+      } catch (e) {
+        console.error("Failed to send signing request to requester:", e);
+      }
+    } else {
+      console.log(`❌ Requester ${requester} not found in connected clients`);
+
+      // Broadcast to channel that user needs to be online
+      broadcastToChannel(channelId, {
+        type: "tip_status",
+        data: {
+          intentId,
+          status: "error",
+          message: `❌ ${requester} needs to be online to sign the tip`
+        }
+      });
+    }
+
+    console.log(`✅ Tip intent ${intentId} stored for ${requester} -> ${recipient}: ${humanAmount}`);
+  };
+
   const handleSignedIntent = async (ws, data, signedData) => {
     const { intentId, signedIntent } = data;
     const { accountId } = data.metadata;
-    
-    console.log(`Processing signed intent ${intentId} from ${accountId}`);
+    const client = wsClients.get(ws);
+
+    // Check if this bot is allowed to process signed intents
+    if (client && client.isBot) {
+      const botConfig = await getBotConfig(client.botId);
+      if (!botConfig?.allowedRequestSignedIntent) {
+        throw new Error("Bot not authorized to process signed intents");
+      }
+    }
+
+    // Processing signed intent
     
     // Find pending intent
     const pendingIntent = pendingIntents.get(intentId);
@@ -1067,28 +1106,50 @@ function loadState() {
       throw new Error("Intent can only be signed by the requester");
     }
     
-    // Remove from pending (it's being processed)
-    pendingIntents.delete(intentId);
-    
-    // Send processing status to channel
-    broadcastToChannel(pendingIntent.channelId, {
-      type: "tip_status",
-      data: {
-        intentId: intentId,
-        status: "processing",
-        from: pendingIntent.requester,
-        to: pendingIntent.recipient,
-        amount: pendingIntent.amount,
-        humanAmount: pendingIntent.humanAmount,
-        token: pendingIntent.token,
-        message: `🔄 Processing tip from ${pendingIntent.requester} to ${pendingIntent.recipient}...`
+    // Send signed intent to tip-bot for publishing
+
+    // Find tip-bot to send the signed intent
+    for (const [botWs, botClient] of wsClients.entries()) {
+      if (botClient.isBot && botClient.botId === "tip-bot") {
+        try {
+          botWs.send(JSON.stringify({
+            type: "publish_signed_intent",
+            data: {
+              intentId,
+              signedIntent,
+              pendingIntent
+            }
+          }));
+          // Signed intent sent to tip-bot
+
+          // Remove from pending (tip-bot will handle it now)
+          pendingIntents.delete(intentId);
+          return;
+        } catch (e) {
+          console.error("Failed to send signed intent to tip-bot:", e);
+        }
       }
-    });
-    
+    }
+
+    console.error("❌ Tip-bot not found - cannot publish intent");
+
     try {
-      // Publish signed intent via solver relay (like Python code)
+      ws.send(JSON.stringify({
+        type: "error",
+        error: "Tip service unavailable - tip-bot not connected"
+      }));
+    } catch (e) {
+      console.error("Failed to send error message to user:", e);
+    }
+
+    // Restore intent to pending for potential retry
+    pendingIntents.set(intentId, pendingIntent);
+    return;
+
+    // OLD CODE BELOW - REMOVE AFTER TESTING
+    try {
       console.log(`Publishing signed intent ${intentId} via solver relay`);
-      
+
       const signedMultiPayload = signedIntent.signedMultiPayload;
       
       // Prepare request as in Python code
@@ -1125,8 +1186,12 @@ function loadState() {
         const intentHash = result.result.intent_hash;
         console.log('Successfully published! Intent Hash:', intentHash);
         
-        // Now wait for intent to settle
-        checkIntentStatus(intentHash, pendingIntent, intentId);
+        // Send server event to tip-bot to handle intent monitoring
+        await serverEventSystem.sendServerEvent(pendingIntent.channelId, "intent_created", {
+          intentId,
+          intentHash,
+          pendingIntent
+        });
       } else {
         // Handle specific error types
         const errorReason = result.result?.reason || 'Unknown error';
@@ -1159,7 +1224,7 @@ function loadState() {
               const addKeyMessage = {
                 type: "add_key_required",
                 data: {
-                  contract: "intents.near",
+                  contractId: process.env.INTENTS_CONTRACT_ID,
                   publicKey: signedIntent.signedMultiPayload.public_key,
                   accountId: pendingIntent.requester,
                   recipientOnly: true
@@ -1215,193 +1280,7 @@ function loadState() {
     }
   };
 
-  const handleRequestTipIntent = async (ws, data, signedData) => {
-    const { channelId, intentId, recipient, amount, humanAmount, originalMessage, requester, replyToNonce } = data;
-    
-    console.log(`Tip intent requested: ${requester} -> ${recipient} (${amount}) in ${channelId}`);
-    
-    // Get channel config for token info
-    const channelConfig = getChannelConfig(channelId);
-    const defaultToken = channelConfig?.defaultToken || "wrap.near";
-    const tokenSymbol = channelConfig?.tokenSymbol || defaultToken;
 
-    // Store pending intent
-    const intentData = {
-      intentId,
-      channelId,
-      recipient,
-      amount, // blockchain amount with decimals
-      humanAmount, // human readable amount for UI
-      token: defaultToken,
-      tokenSymbol,
-      originalMessage,
-      requester,
-      replyToNonce,
-      createdAt: Date.now()
-    };
-    
-    pendingIntents.set(intentId, intentData);
-    
-    // Set timeout (5 minutes)
-    setTimeout(() => {
-      if (pendingIntents.has(intentId)) {
-        pendingIntents.delete(intentId);
-        
-        // Notify about timeout
-        broadcastToChannel(channelId, {
-          type: "tip_status",
-          data: {
-            intentId,
-            status: "error",
-            from: requester,
-            to: recipient,
-            amount: amount,
-            humanAmount: humanAmount,
-            token: defaultToken,
-            error: "Intent signing timeout",
-            message: `❌ Tip from ${requester} to ${recipient} timed out (not signed within 5 minutes)`
-          }
-        });
-      }
-    }, 5 * 60 * 1000); // 5 minutes
-    
-    // Find requester's WebSocket to send sign_intent
-    let requesterWs = null;
-    for (const [clientWs, client] of wsClients.entries()) {
-      // Check if this client is in the channel and matches the requester
-      const clientChannel = client.channels.get(channelId);
-      if (clientChannel && clientChannel.accountId === requester) {
-        requesterWs = clientWs;
-        break;
-      }
-    }
-    
-    if (!requesterWs) {
-      throw new Error("Requester not found in channel");
-    }
-
-    // Check recipient's storage balance before proceeding
-    try {
-      const storageBalance = await checkStorageBalance(defaultToken, recipient);
-      console.log(`Storage balance for ${recipient} in ${defaultToken}:`, storageBalance);
-
-      if (!storageBalance || storageBalance.total === "0" || storageBalance.total === null) {
-        // Recipient is not registered - send storage_deposit_ui request
-        console.log(`Recipient ${recipient} not registered in token ${defaultToken}, requesting storage deposit`);
-
-        requesterWs.send(JSON.stringify({
-          type: "storage_deposit_ui",
-          data: {
-            intentId,
-            recipient,
-            amount,
-            humanAmount,
-            token: defaultToken,
-            tokenSymbol,
-            originalMessage,
-            requester,
-            depositAmount: "12500000000000000000000", // 0.0125 NEAR in yoctoNEAR
-            gas: "30000000000000" // 30 TGas
-          }
-        }));
-
-        // Send notification to tip-bot to post registration message
-        const registrationMessage = `🏦 ${recipient} is not registered in ${tokenSymbol} token yet. We've asked ${requester} to register ${recipient} in the token contract so they can receive tips.`;
-
-        // Find tip-bot and send notification
-        for (const [clientWs, client] of wsClients.entries()) {
-          if (client.isBot && client.botId === "tip-bot") {
-            try {
-              clientWs.send(JSON.stringify({
-                type: "storage_registration_required",
-                data: {
-                  channelId,
-                  message: registrationMessage,
-                  replyToNonce,
-                  recipient,
-                  requester,
-                  tokenSymbol
-                }
-              }));
-              console.log("Sent storage registration notification to tip-bot");
-              break;
-            } catch (e) {
-              console.error("Failed to send storage registration notification to tip-bot:", e);
-            }
-          }
-        }
-
-        console.log(`Sent storage_deposit_ui request to ${requester} for ${recipient}`);
-        return; // Don't proceed with sign_intent
-      }
-    } catch (error) {
-      console.error(`Error checking storage balance for ${recipient}:`, error);
-      // Continue with sign_intent if storage check fails
-    }
-
-    // Send sign_intent to the requester
-    try {
-      requesterWs.send(JSON.stringify({
-        type: "sign_intent",
-        data: {
-          intentId,
-          recipient,
-          amount, // blockchain amount for signing
-          humanAmount, // human readable amount for UI display
-          token: defaultToken,
-          originalMessage,
-          requester
-        }
-      }));
-
-      console.log(`Sent sign_intent ${intentId} to ${requester}`);
-    } catch (e) {
-      console.error("Failed to send sign_intent:", e);
-      // Clean up pending intent
-      pendingIntents.delete(intentId);
-      throw new Error("Failed to send signing request to client");
-    }
-  };
-
-  const handleDepositRequest = async (ws, data, signedData) => {
-    const { channelId, targetAccountId, token, requiredAmount, decimals, tokenSymbol } = data;
-
-    console.log(`Deposit request for ${targetAccountId}: ${requiredAmount} ${token} in ${channelId}`);
-
-    // Find the target user's WebSocket in the channel
-    let targetWs = null;
-    for (const [clientWs, client] of wsClients.entries()) {
-      const clientChannel = client.channels.get(channelId);
-      if (clientChannel && clientChannel.accountId === targetAccountId) {
-        targetWs = clientWs;
-        break;
-      }
-    }
-
-    if (!targetWs) {
-      console.log(`Target user ${targetAccountId} not found in channel ${channelId}`);
-      return;
-    }
-
-    // Send deposit UI message only to the target user
-    try {
-      targetWs.send(JSON.stringify({
-        type: "deposit_ui",
-        data: {
-          channelId,
-          accountId: targetAccountId,
-          token,
-          requiredAmount, // Human readable amount
-          decimals,
-          tokenSymbol
-        }
-      }));
-
-      console.log(`Sent deposit UI to ${targetAccountId}`);
-    } catch (e) {
-      console.error("Failed to send deposit UI:", e);
-    }
-  };
 
   const handleReaction = async (ws, data, signedData) => {
     const { channelId, messageNonce, emoji, reactionAction } = data; // reactionAction: 'add' or 'remove'
@@ -1539,7 +1418,7 @@ function loadState() {
     }
 
     // Check if user has permission to pin messages (admin or channel creator)
-    const channelConfig = getChannelConfig(channelId);
+    const channelConfig = await getChannelConfig(channelId);
     const isChannelModerator = (channelConfig && channelConfig.adminUsers && channelConfig.adminUsers.includes(accountId)) ||
                                channel.createdBy === accountId;
 
@@ -1636,6 +1515,7 @@ function loadState() {
     }
   };
 
+
   const handleReactionDetails = async (ws, data, signedData) => {
     const client = data.client;
     const channelId = data.channelId;
@@ -1703,7 +1583,7 @@ function loadState() {
 
         switch (data.action) {
           case "register_bot":
-            handleRegisterBot(ws, data, signedData);
+            await handleRegisterBot(ws, data, signedData);
             break;
           case "join":
             await handleJoin(ws, req, data, signedData);
@@ -1726,14 +1606,11 @@ function loadState() {
           case "available_channels":
             handleAvailableChannels(ws, data, signedData);
             break;
-          case "signed_intent":
-            await handleSignedIntent(ws, data, signedData);
-            break;
           case "request_tip_intent":
             await handleRequestTipIntent(ws, data, signedData);
             break;
-          case "deposit_request":
-            await handleDepositRequest(ws, data, signedData);
+          case "signed_intent":
+            await handleSignedIntent(ws, data, signedData);
             break;
           case "reaction":
             await handleReaction(ws, data, signedData);
@@ -1782,7 +1659,6 @@ function loadState() {
     console.log("🛑 Shutting down server...");
     console.log("💾 Saving state...");
     saveState();
-    botManager.stopAllBots();
     process.exit(0);
   });
 
@@ -1790,7 +1666,6 @@ function loadState() {
     console.log("🛑 Shutting down server...");
     console.log("💾 Saving state...");
     saveState();
-    botManager.stopAllBots();
     process.exit(0);
   });
 })();

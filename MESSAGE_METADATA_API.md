@@ -63,7 +63,7 @@ const messageData = {
   },
   metadata: {
     accountId: "user.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -119,7 +119,7 @@ const pinData = {
   isPinned: true,
   metadata: {
     accountId: "moderator.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -144,7 +144,7 @@ const requestData = {
   channelId: "general",
   metadata: {
     accountId: "user.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -202,7 +202,7 @@ const reactionData = {
   reactionAction: "add",
   metadata: {
     accountId: "user.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -217,7 +217,7 @@ const reactionData = {
   reactionAction: "remove", // ← Important: use "remove" to delete existing reaction
   metadata: {
     accountId: "user.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -260,7 +260,7 @@ const detailsRequest = {
   messageNonce: 123,
   metadata: {
     accountId: "user.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:...",
     timestampMs: Date.now()
   }
@@ -453,7 +453,7 @@ const messageData = {
   },
   metadata: {
     accountId: "alice.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:ABC123...",
     timestampMs: 1634567890123
   }
@@ -499,7 +499,7 @@ const pinData = {
   isPinned: true,
   metadata: {
     accountId: "moderator.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:DEF456...",
     timestampMs: 1634567890200
   }
@@ -529,7 +529,7 @@ const reactionData = {
   reactionAction: "add",
   metadata: {
     accountId: "bob.near",
-    contractId: null,
+    contractId: "social.near",
     publicKey: "ed25519:GHI789...",
     timestampMs: 1634567890300
   }

@@ -1,85 +1,26 @@
-import fs from "fs";
+import { configManager } from "../shared/config-manager.js";
 
-let botsConfig = {};
-const BOTS_CONFIG_PATH = "bots-config.json";
-
+// Legacy functions for backward compatibility
 export const loadBotsConfig = () => {
-  try {
-    if (fs.existsSync(BOTS_CONFIG_PATH)) {
-      const configData = fs.readFileSync(BOTS_CONFIG_PATH, 'utf8');
-      botsConfig = JSON.parse(configData);
-      console.log(`Loaded ${Object.keys(botsConfig).length} bot configurations`);
-      console.log(Object.keys(botsConfig))
-    } else {
-      console.log("bots-config.json not found, using empty config");
-      botsConfig = {};
-    }
-  } catch (error) {
-    console.error("Error loading bots config:", error);
-    botsConfig = {};
-  }
+  configManager.loadConfigs();
 };
 
-export const getBotConfig = (botId) => {
-  return botsConfig[botId] || null;
+export const getBotConfig = async (botId) => {
+  return await configManager.getBotConfig(botId);
 };
 
-export const getAllBotsConfig = () => {
-  return botsConfig;
+export const getAllBotsConfig = async () => {
+  return await configManager.getAllBotsConfig();
 };
 
-export const isValidBot = (accountId) => {
-  return Object.values(botsConfig).some(bot => 
-    bot.accountId === accountId && bot.enabled
-  );
+export const isValidBot = async (accountId) => {
+  return await configManager.isValidBot(accountId);
 };
 
-export const shouldBotReceiveMessage = (botId, channelId, message) => {
-  const botConfig = getBotConfig(botId);
-  if (!botConfig || !botConfig.enabled) {
-    return false;
-  }
-
-  if (!botConfig.channels.includes(channelId)) {
-    return false;
-  }
-
-  const { filters } = botConfig;
-  const messageText = message.toLowerCase();
-
-  // Check commands
-  if (filters.commands) {
-    for (const command of filters.commands) {
-      if (messageText.startsWith(command.toLowerCase())) {
-        return true;
-      }
-    }
-  }
-
-  // Check mentions
-  if (filters.mentions) {
-    for (const mention of filters.mentions) {
-      if (messageText.includes(mention.toLowerCase())) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+export const shouldBotReceiveMessage = async (botId, channelId, message) => {
+  return await configManager.shouldBotReceiveMessage(botId, channelId, message);
 };
 
-export const getBotsForMessage = (channelId, message) => {
-  const matchingBots = [];
-  
-  for (const [botId, botConfig] of Object.entries(botsConfig)) {
-    if (shouldBotReceiveMessage(botId, channelId, message)) {
-      matchingBots.push({
-        botId,
-        accountId: botConfig.accountId,
-        name: botConfig.name
-      });
-    }
-  }
-  
-  return matchingBots;
+export const getBotsForMessage = async (channelId, message) => {
+  return await configManager.getBotsForMessage(channelId, message);
 };

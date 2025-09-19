@@ -1,4 +1,4 @@
-import { isValidAccountId } from "./near.js";
+import { isValidAccountId } from "../shared/near.js";
 
 const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.near.org";
 
@@ -94,18 +94,21 @@ const checkWhitelist = async (accountId, accounts) => {
 
 export const evaluateRule = async (accountId, rule) => {
   switch (rule.type) {
-    case "near_balance":
-      return await checkNearBalance(accountId, rule.min);
-    
-    case "ft_balance":
-      return await checkFtBalance(accountId, rule.contract, rule.min);
-    
-    case "has_contract_on_account":
-      return await checkContractInteraction(accountId, rule.min_contracts);
+    case "allowAll":
+      return true;
     
     case "whitelist":
       return await checkWhitelist(accountId, rule.accounts);
-    
+
+    case "near_balance":
+      return await checkNearBalance(accountId, rule.min);
+
+    case "ft_balance":
+      return await checkFtBalance(accountId, rule.contract, rule.min);
+
+    case "has_contract_on_account":
+      return await checkContractInteraction(accountId, rule.min_contracts);
+
     default:
       console.log(`Unknown rule type: ${rule.type}`);
       return false;

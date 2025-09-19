@@ -1,32 +1,18 @@
-import fs from "fs";
 import path from "path";
 import { evaluateAllRules } from "./rules-engine.js";
+import { configManager } from "../shared/config-manager.js";
 
-let channelsConfig = {};
-const CONFIG_PATH = "channels-config.json";
-
+// Legacy functions for backward compatibility
 export const loadChannelsConfig = () => {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const configData = fs.readFileSync(CONFIG_PATH, 'utf8');
-      channelsConfig = JSON.parse(configData);
-      console.log(`Loaded ${Object.keys(channelsConfig).length} channel configurations`);
-    } else {
-      console.log("channels-config.json not found, using empty config");
-      channelsConfig = {};
-    }
-  } catch (error) {
-    console.error("Error loading channels config:", error);
-    channelsConfig = {};
-  }
+  configManager.loadConfigs();
 };
 
-export const getChannelConfig = (channelId) => {
-  return channelsConfig[channelId] || null;
+export const getChannelConfig = async (channelId) => {
+  return await configManager.getChannelConfig(channelId);
 };
 
-export const getAllChannelConfigs = () => {
-  return channelsConfig;
+export const getAllChannelConfigs = async () => {
+  return await configManager.getAllChannelsConfig();
 };
 
 export const getAvailableChannels = async (accountId, channels = null, wsClients = null, userChannelVisits = null) => {
@@ -34,41 +20,42 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
   const userVisitedChannels = userChannelVisits?.get(accountId) || new Set();
 
   // First, add configured channels
+  const channelsConfig = await configManager.getAllChannelsConfig();
   for (const [channelId, config] of Object.entries(channelsConfig)) {
     try {
-      const hasAccess = await evaluateAllRules(accountId, config.rules);
+      const hasAccess = await canUserAccessChannel(accountId, channelId);
       const showInDiscovery = config.showInDiscovery !== false; // Default to true if not specified
 
-      if (hasAccess && showInDiscovery) {
-        // Get member and bot counts from active channels
-        const channelClients = channels?.get(channelId)?.clients || new Map();
-        let memberCount = 0;
-        let botsCount = 0;
+      // Get member and bot counts from active channels
+      const channelClients = channels?.get(channelId)?.clients || new Map();
+      let memberCount = 0;
+      let botsCount = 0;
 
-        // Count members vs bots based on wsClients data
-        for (const [clientId, ws] of channelClients) {
-          const clientData = wsClients?.get(ws);
-          if (clientData?.isBot) {
-            botsCount++;
-          } else {
-            memberCount++;
-          }
+      // Count members vs bots based on wsClients data
+      for (const [clientId, ws] of channelClients) {
+        const clientData = wsClients?.get(ws);
+        if (clientData?.isBot) {
+          botsCount++;
+        } else {
+          memberCount++;
         }
-
-        availableChannels[channelId] = {
-          name: config.name,
-          description: config.description,
-          isPublic: config.isPublic,
-          defaultToken: config.defaultToken || "",
-          tokenDecimals: config.tokenDecimals || 24,
-          tokenSymbol: config.tokenSymbol || "",
-          minTipAmount: config.minTipAmount || 0.01,
-          memberCount: memberCount,
-          botsCount: botsCount,
-          isConfigured: true,
-          hasVisited: userVisitedChannels.has(channelId)
-        };
       }
+
+      availableChannels[channelId] = {
+        channelId,
+        name: config.name || channelId,
+        description: config.description,
+        isPublic: config.isPublic,
+        defaultToken: config.defaultToken || "",
+        tokenDecimals: config.tokenDecimals || 24,
+        tokenSymbol: config.tokenSymbol || "",
+        minTipAmount: config.minTipAmount || 0.01,
+        memberCount: memberCount,
+        botsCount: botsCount,
+        isConfigured: true,
+        hasAccess,
+        hasVisited: userVisitedChannels.has(channelId)
+      };
     } catch (error) {
       console.error(`Error evaluating rules for channel ${channelId} and user ${accountId}:`, error);
     }
@@ -95,20 +82,23 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
           }
 
           availableChannels[visitedChannelId] = {
-            name: visitedChannelId, // Use channelId as name for user-created channels
-            description: "", // Need to load description from the channel regisrty
-            isPublic: false, // User-created channels are private by default
+            channelId: visitedChannelId,
+            name: visitedChannelId,
+            description: "",
+            isPublic: false,
             defaultToken: "",
             tokenDecimals: 24,
             tokenSymbol: "",
             minTipAmount: 0.01,
             memberCount: memberCount,
             botsCount: botsCount,
-            isConfigured: false, // Mark as user-created
+            isConfigured: false,
+            isUserCreated: true,
             createdBy: channel.createdBy,
             createdAt: channel.createdAt,
-            hasVisited: true, // Always true for previously visited channels
-            isCurrentlyJoined: false // User is not currently in this channel
+            hasAccess: true,
+            hasVisited: true,
+            isCurrentlyJoined: false
           };
         }
       }
@@ -140,20 +130,23 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
               }
 
               availableChannels[channelId] = {
-                name: channelId, // Use channelId as name for user-created channels
+                channelId,
+                name: channelId,
                 description: `User-created channel`,
-                isPublic: false, // User-created channels are private by default
+                isPublic: false,
                 defaultToken: "",
                 tokenDecimals: 24,
                 tokenSymbol: "",
                 minTipAmount: 0.01,
                 memberCount: memberCount,
                 botsCount: botsCount,
-                isConfigured: false, // Mark as user-created
+                isConfigured: false,
+                isUserCreated: true,
                 createdBy: channel.createdBy,
                 createdAt: channel.createdAt,
+                hasAccess: true,
                 hasVisited: userVisitedChannels.has(channelId),
-                isCurrentlyJoined: true // User is currently in this channel
+                isCurrentlyJoined: true
               };
             }
           } else if (availableChannels[channelId]) {
@@ -171,11 +164,12 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
 };
 
 export const canUserAccessChannel = async (accountId, channelId) => {
-  const config = getChannelConfig(channelId);
+  const config = await getChannelConfig(channelId);
   if (!config) {
-    return false;
+    // If channel is not configured, allow access (user can create channels)
+    return true;
   }
-  
+
   try {
     return await evaluateAllRules(accountId, config.rules);
   } catch (error) {

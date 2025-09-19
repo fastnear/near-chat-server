@@ -1,6 +1,5 @@
 import { fromBase58, toBase58, isString } from "./utils.js";
 import { ed25519 } from "@noble/curves/ed25519";
-import { sha256 } from "@noble/hashes/sha2";
 import { hexToBytes } from "@noble/hashes/utils";
 import { KeyPair } from '@near-js/crypto';
 import { baseEncode } from '@near-js/utils';
@@ -48,7 +47,7 @@ const keyToString = (key) => `ed25519:${toBase58(key)}`;
 const isImplicitNearAccount = (accountId) =>
   accountId.match(IMPLICIT_ACCOUNT_ID_RE);
 
-const verifySignature = (publicKey, signature, signedData) => {
+const verifySignature = async (publicKey, signature, signedData) => {
   if (!signedData || !isString(signedData)) {
     throw new Error("Invalid signedData");
   }
@@ -67,12 +66,14 @@ const verifySignature = (publicKey, signature, signedData) => {
     throw new Error("Invalid signature length");
   }
   const binarySignedData = new TextEncoder().encode(signedData);
-  const dataHash = sha256(binarySignedData);
-  if (!ed25519.verify(parsedSignature, dataHash, parsedPublicKey)) {
+  const dataHash = await crypto.subtle.digest('SHA-256', binarySignedData);
+  if (!ed25519.verify(parsedSignature, new Uint8Array(dataHash), parsedPublicKey)) {
     if (!SKIP_SIGNATURE_VERIFICATION) {
       throw new Error("Invalid signature");
     }
   }
+
+  return true;
 };
 
 // Assumes the account ID is valid and implicit.

@@ -3,24 +3,9 @@
 # Start Tip Bot for NEAR Chat Server
 echo "Starting Tip Bot..."
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "⚠️  .env file not found. Creating template..."
-    cat > .env << EOF
-# NEAR Chat Server Configuration
-WS_URL=ws://localhost:7071
-
-# Bot Private Keys (generate your own!)
-TIP_BOT_PRIVATE_KEY=ed25519:3KyUuch8pYP47krBq4DosFEVBMR5wDTMQ8AThzM8kAEcBQHqjEtzBx4JhPQqpX2vGvPEAF7V2vPPm9h3PVfDaYeP
-GPT_BOT_PRIVATE_KEY=ed25519:3KyUuch8pYP47krBq4DosFEVBMR5wDTMQ8AThzM8kAEcBQHqjEtzBx4JhPQqpX2vGvPEAF7V2vPPm9h3PVfDaYeP
-
-# OpenAI Configuration (for GPT bot)
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_ENDPOINT=https://api.openai.com/v1/chat/completions
-OPENAI_MODEL_NAME=gpt-3.5-turbo
-OPENAI_MAX_TOKENS=150
-EOF
-    echo "✅ Created .env template. Please edit it with your credentials."
+# Check if bot .env file exists
+if [ ! -f bots/tip-bot/.env ]; then
+    echo "⚠️  Tip bot .env file not found."
     exit 1
 fi
 
@@ -36,4 +21,4 @@ echo "✅ Server is running"
 
 # Start the tip bot
 echo "🚀 Starting Tip Bot..."
-node bots/tip-bot.js
+cd bots/tip-bot && node index.js

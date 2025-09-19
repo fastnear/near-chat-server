@@ -4,10 +4,18 @@ import {
 } from "base58-js";
 
 import fs from "fs";
+import path from "path";
 
 function saveJson(json, filename) {
   try {
     const data = JSON.stringify(json);
+
+    // Create directory if it doesn't exist
+    const dir = path.dirname(filename);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
     fs.writeFileSync(filename, data);
   } catch (e) {
     console.error("Failed to save JSON:", filename, e);
