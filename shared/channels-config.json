@@ -12,10 +12,14 @@
   "whales": {
     "name": "Whales",
     "description": "For NEAR holders with 1000+ Native NEAR",
-    "isPublic": false, 
-    "rules": [
-      { "type": "near_balance", "min": 1000 }
-    ],
+    "isPublic": false,
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        { "type": "near_balance", "operator": "gte", "value": "1000000000000000000000000000" }
+      ]
+    },
     "defaultToken": "",
     "tokenSymbol": "",
     "tokenDecimals": 24,
@@ -25,9 +29,13 @@
     "name": "JAMBO Holders",
     "description": "For JAMBO token holders with 1+ tokens",
     "isPublic": false,
-    "rules": [
-      { "type": "ft_balance", "contract": "jambo-1679.meme-cooking.near", "min": 1 }
-    ],
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        { "type": "ft_balance", "contract": "jambo-1679.meme-cooking.near", "operator": "gte", "value": "1000000000000000000" }
+      ]
+    },
     "defaultToken": "jambo-1679.meme-cooking.near",
     "tokenSymbol": "JAMBO",
     "tokenDecimals": 18,
@@ -56,12 +64,16 @@
     "name": "FastNEAR",
     "description": "Exclusive access",
     "isPublic": false,
-    "rules": [
-      {
-        "type": "whitelist",
-        "accounts": ["vadim.near", "mob.near", "mike.near"]
-      }
-    ],
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        {
+          "type": "whitelist",
+          "accounts": ["vadim.near", "mob.near", "mike.near"]
+        }
+      ]
+    },
     "defaultToken": "",
     "tokenSymbol": "",
     "tokenDecimals": 24
@@ -69,7 +81,7 @@
   "support": {
     "name": "Support",
     "description": "Chat to improve the chat",
-    "isPublic": true,
+    "isPublic": false,
     "showInDiscovery": false,
     "rules": [],
     "defaultToken": "",
@@ -82,13 +94,42 @@
     "description": "Manage AI bot here",
     "isPublic": false,
     "showInDiscovery": false,
-    "rules": [{
-        "type": "whitelist",
-        "accounts": ["ai-is-near.near", "zavodil.near"]
-      }],
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        {
+          "type": "whitelist",
+          "accounts": ["ai-is-near.near", "zavodil.near"]
+        }
+      ]
+    },
     "defaultToken": "",
     "tokenSymbol": "",
     "tokenDecimals": 24,
     "adminUsers": ["zavodil.near"]
-  } 
+  },
+  "tip-bot-admin": {
+    "name": "Admin TIP bot",
+    "description": "Manage TIP bot here",
+    "isPublic": false,
+    "showInDiscovery": false,
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        {
+          "type": "whitelist",
+          "accounts": ["tipbot.near", "zavodil.near"]
+        }
+      ]
+    },
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "adminUsers": ["zavodil.near"]
+  },  
+  "jamborghini-drivers": {
+    "debug": false
+  }
 }

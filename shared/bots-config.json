@@ -3,7 +3,7 @@
     "name": "Tip Bot",
     "displayName": "@tipbot",
     "accountId": "tipbot.near",
-    "channels": ["general", "developers"],
+    "channels": ["general", "developers", "tip-bot-admin", "jamborghini-drivers"],
     "filters": {
       "commands": ["/tip"],
       "mentions": ["@tipbot"]
@@ -16,7 +16,7 @@
     "name": "GPT Assistant",
     "displayName": "@ai",
     "accountId": "ai-is-near.near",
-    "channels": ["general", "developers", "ai-bot-admin", "memecoins"],
+    "channels": ["general", "developers", "ai-bot-admin", "memecoins", "jamborghini-drivers"],
     "filters": {
       "commands": ["/ask", "/gpt"],
       "mentions": ["@gpt", "@ai"]

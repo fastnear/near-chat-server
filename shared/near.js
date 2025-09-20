@@ -16,7 +16,6 @@ const CACHE_ACCESS_KEY_TTL_MS =
 const MAX_FETCH_ACCESS_KEY_ATTEMPTS = 5; // Number of attempts to fetch access key
 const FETCH_ACCESS_KEY_INITIAL_RETRY_DELAY_MS = 500;
 const FETCH_ACCESS_KEY_MAX_RETRY_DELAY_MS = 5000; // Max delay between retries
-const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.fastnear.com";
 const NEAR_FINALITY = "optimistic"; // Finality level for NEAR queries
 const SKIP_SIGNATURE_VERIFICATION =
   process.env.SKIP_SIGNATURE_VERIFICATION === "true";
@@ -89,6 +88,7 @@ const derivePublicKeyFromImplicitAccountId = (accountId) => {
 };
 
 const fetchAccessKey = async (accountId, publicKey) => {
+  const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.fastnear.com";
   const response = await fetch(NODE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -170,6 +170,7 @@ const signMessage = async (message, keyPair) => {
   }
 
 const viewFunction = async (contractId, methodName, args = {}) => {
+  const NODE_URL = process.env.NODE_URL || "https://rpc.mainnet.fastnear.com";
   const response = await fetch(NODE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

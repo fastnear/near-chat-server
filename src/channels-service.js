@@ -26,6 +26,16 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
       const hasAccess = await canUserAccessChannel(accountId, channelId);
       const showInDiscovery = config.showInDiscovery !== false; // Default to true if not specified
 
+      // Skip channels user doesn't have access to (unless they are public or previously visited)
+      if (!hasAccess && !config.isPublic && !userVisitedChannels.has(channelId)) {
+        continue;
+      }
+
+      // Skip channels with showInDiscovery: false unless user has visited them
+      if (config.showInDiscovery === false && !userVisitedChannels.has(channelId)) {
+        continue;
+      }
+
       // Get member and bot counts from active channels
       const channelClients = channels?.get(channelId)?.clients || new Map();
       let memberCount = 0;
@@ -41,7 +51,7 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
         }
       }
 
-      availableChannels[channelId] = {
+      const channelInfo = {
         channelId,
         name: config.name || channelId,
         description: config.description,
@@ -56,6 +66,24 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
         hasAccess,
         hasVisited: userVisitedChannels.has(channelId)
       };
+
+      // Add contract-specific fields if they exist
+      if (config.validUntil !== undefined) {
+        channelInfo.validUntil = config.validUntil;
+      }
+      if (config.logoUrl) {
+        channelInfo.logoUrl = config.logoUrl;
+      }
+      if (config.creatorId) {
+        channelInfo.creatorId = config.creatorId;
+      }
+
+      // Add access conditions for frontend display
+      if (config.rules) {
+        channelInfo.accessConditions = config.rules;
+      }
+
+      availableChannels[channelId] = channelInfo;
     } catch (error) {
       console.error(`Error evaluating rules for channel ${channelId} and user ${accountId}:`, error);
     }
@@ -171,7 +199,7 @@ export const canUserAccessChannel = async (accountId, channelId) => {
   }
 
   try {
-    return await evaluateAllRules(accountId, config.rules);
+    return await evaluateAllRules(accountId, config.rules, config.debug);
   } catch (error) {
     console.error(`Error checking access for user ${accountId} to channel ${channelId}:`, error);
     return false;

@@ -2,10 +2,16 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
 
+// Import viewFunction from near.js
+const { viewFunction } = await import('./near.js');
+
 const CACHE_CONFIG_TIME_IN_SECONDS = parseInt(process.env.CACHE_CONFIG_TIME_IN_SECONDS) || 60; // Default 1 minute
+const CHATROOM_CONTRACT_ID = process.env.CHATROOM_CONTRACT_ID || "chatrooms.near";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const DEFAULT_CONFIG_SOURCE = process.env.DEFAULT_CONFIG_SOURCE || 'file_and_smart_contract'; // Options: 'file', 'smart_contract', 'file_and_smart_contract'
 
 /**
  * Centralized configuration manager
@@ -16,7 +22,7 @@ class ConfigManager {
     this.channelsConfig = {};
     this.botsConfig = {};
     this.lastLoadTime = 0;
-    this.configSource = 'file'; // Default to file-based config
+    this.configSource = DEFAULT_CONFIG_SOURCE; // Options: 'file', 'smart_contract', 'file_and_smart_contract'
   }
 
   isConfigCacheValid() {
@@ -38,6 +44,11 @@ class ConfigManager {
 
     if (this.configSource === 'smart_contract') {
       await this.loadConfigsFromSmartContract();
+    } else if (this.configSource === 'file_and_smart_contract') {
+      // Load from both sources, smart contract takes precedence
+      this.loadChannelsConfig();
+      this.loadBotsConfig();
+      await this.loadAndMergeFromSmartContract();
     } else {
       this.loadChannelsConfig();
       this.loadBotsConfig();
@@ -213,24 +224,226 @@ class ConfigManager {
   }
 
   /**
-   * Future: Load configs from smart contract
-   * This method will replace loadConfigs() when ready
+   * Load configs from smart contract
    */
   async loadConfigsFromSmartContract(contractId = null) {
-    // TODO: Implement smart contract integration
-    // Expected implementation:
-    // 1. Connect to NEAR network
-    // 2. Call view methods on the config contract
-    // 3. Load channels config from contract storage
-    // 4. Load bots config from contract storage
-    // 5. Cache configs in memory for performance
-
-    const configContractId = contractId || process.env.CONFIG_CONTRACT_ID;
+    const configContractId = contractId || CHATROOM_CONTRACT_ID;
     if (!configContractId) {
-      throw new Error("CONFIG_CONTRACT_ID environment variable not set");
+      throw new Error("CHATROOM_CONTRACT_ID environment variable not set");
     }
 
-    throw new Error("Smart contract integration not implemented yet");
+    console.log(`ConfigManager: Loading configs from smart contract ${configContractId}`);
+
+    try {
+      const chatrooms = await this.fetchChatroomsFromContract(configContractId);
+      this.channelsConfig = this.convertChatroomsToChannelsConfig(chatrooms);
+      // Bots config is still loaded from file for now
+      this.loadBotsConfig();
+
+      console.log(`ConfigManager: Loaded ${Object.keys(this.channelsConfig).length} channel configurations from contract`);
+    } catch (error) {
+      console.error("ConfigManager: Error loading configs from smart contract:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load and merge configs from smart contract with file configs
+   */
+  async loadAndMergeFromSmartContract() {
+    if (!CHATROOM_CONTRACT_ID) {
+      console.log("ConfigManager: CHATROOM_CONTRACT_ID not set, skipping smart contract integration");
+      return;
+    }
+
+    console.log(`ConfigManager: Attempting to fetch chatrooms from contract: ${CHATROOM_CONTRACT_ID}`);
+    try {
+      const chatrooms = await this.fetchChatroomsFromContract(CHATROOM_CONTRACT_ID);
+      const contractChannelsConfig = this.convertChatroomsToChannelsConfig(chatrooms);
+
+      // Merge with file config, contract takes precedence but allow file overrides for certain fields
+      const mergedConfig = { ...this.channelsConfig };
+
+      for (const [channelId, contractConfig] of Object.entries(contractChannelsConfig)) {
+        const fileConfig = this.channelsConfig[channelId];
+
+        if (fileConfig) {
+          // Merge: contract config takes precedence, but allow file overrides for debug settings
+          mergedConfig[channelId] = {
+            ...contractConfig,
+            // Allow file config to override debug settings
+            debug: fileConfig.debug !== undefined ? fileConfig.debug : contractConfig.debug
+          };
+        } else {
+          // Pure contract config
+          mergedConfig[channelId] = contractConfig;
+        }
+      }
+
+      this.channelsConfig = mergedConfig;
+
+      console.log(`ConfigManager: Merged ${Object.keys(contractChannelsConfig).length} channels from contract`);
+    } catch (error) {
+      console.error("ConfigManager: Error loading from smart contract, using file config only:", error);
+    }
+  }
+
+  /**
+   * Fetch chatrooms from NEAR smart contract
+   */
+  async fetchChatroomsFromContract(contractId) {
+    console.log(`ConfigManager: Calling viewFunction for contract ${contractId}.get_chatrooms()`);
+
+    try {
+      const result = await viewFunction(contractId, "get_chatrooms");
+
+      if (!result) {
+        throw new Error("Contract returned null/undefined - method might not exist or returned empty");
+      }
+
+      console.log(`ConfigManager: Contract returned ${Array.isArray(result) ? result.length : 'non-array'} chatrooms`);
+      console.log(`ConfigManager: Raw chatrooms:`, JSON.stringify(result, null, 2));
+
+      return result;
+    } catch (error) {
+      console.error(`ConfigManager: Error calling ${contractId}.get_chatrooms():`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Convert contract chatrooms format to channels config format
+   */
+  convertChatroomsToChannelsConfig(chatrooms) {
+    const channelsConfig = {};
+
+    for (const room of chatrooms) {
+      const channelId = room.channel_id;
+      const config = {
+        name: room.channel_name,
+        description: room.channel_description,
+        isPublic: false, // Contract rooms are typically private
+        rules: this.convertConditionToRules(room.condition),
+        defaultToken: room.default_token?.asset_id ? this.extractTokenFromAssetId(room.default_token.asset_id) : "",
+        tokenSymbol: room.default_token?.symbol || "",
+        tokenDecimals: room.default_token?.decimals || 24,
+        adminUsers: room.admins || [],
+
+        // Additional contract-specific fields
+        logoUrl: room.logo_url,
+        creatorId: room.creator_id,
+        validUntil: room.valid_until,
+
+        // Mark as contract-sourced
+        isFromContract: true
+      };
+
+      channelsConfig[channelId] = config;
+    }
+
+    return channelsConfig;
+  }
+
+  /**
+   * Extract token contract from asset_id (e.g., "nep141:jambo-1679.meme-cooking.near" -> "jambo-1679.meme-cooking.near")
+   */
+  extractTokenFromAssetId(assetId) {
+    if (assetId.startsWith('nep141:')) {
+      return assetId.substring(7);
+    }
+    return assetId;
+  }
+
+  /**
+   * Convert contract condition format to config rules format
+   */
+  convertConditionToRules(condition) {
+    if (!condition) {
+      return [];
+    }
+
+    return this.convertConditionRecursive(condition);
+  }
+
+  /**
+   * Recursively convert contract condition to rules
+   */
+  convertConditionRecursive(condition) {
+    // Handle Rust enum variants
+    if (condition.Logic) {
+      return {
+        type: "logic",
+        operator: condition.Logic.operator.toLowerCase(),
+        conditions: condition.Logic.conditions.map(c => this.convertConditionRecursive(c))
+      };
+    }
+
+    if (condition.Not) {
+      return {
+        type: "not",
+        condition: this.convertConditionRecursive(condition.Not.condition)
+      };
+    }
+
+    if (condition.AllowAll !== undefined) {
+      return { type: "allowAll" };
+    }
+
+    if (condition.Whitelist) {
+      return {
+        type: "whitelist",
+        accounts: condition.Whitelist.accounts
+      };
+    }
+
+    if (condition.NearBalance) {
+      return {
+        type: "near_balance",
+        operator: this.convertOperator(condition.NearBalance.operator),
+        value: condition.NearBalance.value.toString()
+      };
+    }
+
+    if (condition.FtBalance) {
+      return {
+        type: "ft_balance",
+        contract: condition.FtBalance.contract,
+        operator: this.convertOperator(condition.FtBalance.operator),
+        value: condition.FtBalance.value.toString()
+      };
+    }
+
+    if (condition.NftOwned) {
+      return {
+        type: "nft_owned",
+        contract: condition.NftOwned.contract
+      };
+    }
+
+    if (condition.HasContractOnAccount) {
+      return {
+        type: "has_contract_on_account",
+        operator: this.convertOperator(condition.HasContractOnAccount.operator),
+        value: condition.HasContractOnAccount.value
+      };
+    }
+
+    throw new Error(`Unknown condition type: ${JSON.stringify(condition)}`);
+  }
+
+  /**
+   * Convert contract operator to config operator
+   */
+  convertOperator(operator) {
+    const operatorMap = {
+      'Gte': 'gte',
+      'Lte': 'lte',
+      'Gt': 'gt',
+      'Lt': 'lt',
+      'Eq': 'eq',
+      'Ne': 'ne'
+    };
+    return operatorMap[operator] || operator.toLowerCase();
   }
 
   /**
@@ -283,7 +496,7 @@ class ConfigManager {
 
     // Save to file (in production, this would save to smart contract)
     try {
-      this.saveBotsConfig();
+      // TODO: Implement saveBotsConfigToFile() method\n      // this.saveBotsConfigToFile();
       console.log(`✅ ConfigManager: Updated ${botId} channels: ${oldChannels.join(',')} → ${newChannels.join(',')}`);
       return true;
     } catch (error) {
@@ -343,11 +556,11 @@ class ConfigManager {
   }
 
   /**
-   * Set config source (file or smart contract)
+   * Set config source (file, smart_contract, or file_and_smart_contract)
    */
   setConfigSource(source) {
-    if (!['file', 'smart_contract'].includes(source)) {
-      throw new Error("Config source must be 'file' or 'smart_contract'");
+    if (!['file', 'smart_contract', 'file_and_smart_contract'].includes(source)) {
+      throw new Error("Config source must be 'file', 'smart_contract', or 'file_and_smart_contract'");
     }
     this.configSource = source;
     this.lastLoadTime = 0; // Force reload when source changes
@@ -357,7 +570,7 @@ class ConfigManager {
    * Get current config source
    */
   getConfigSource() {
-    return this.configSource || 'file';
+    return this.configSource || DEFAULT_CONFIG_SOURCE;
   }
 }
 

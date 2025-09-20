@@ -1,0 +1,61 @@
+"test-complex": {    
+    "name": "Complex Rules Test",
+    "description": "Test channel with complex access rules: (100+ JAMBO OR 200+ NEAR) AND NOT blacklisted AND (whale OR has contract)",
+    "isPublic": false,
+    "showInDiscovery": false,
+    "debug": true,
+    "rules": {
+      "type": "logic",
+      "operator": "and",
+      "conditions": [
+        {
+          "type": "nft_owned",
+          "contract": "auroradoves.near"
+        },
+        {
+          "type": "logic",
+          "operator": "or",
+          "conditions": [
+            {
+              "type": "ft_balance",
+              "contract": "jambo-1679.meme-cooking.near",
+              "operator": "gte",
+              "value": "100000000000000000000"},
+            {
+              "type": "near_balance",
+              "operator": "gte",
+              "value": "150000000000000000000000000"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "condition": {
+            "type": "whitelist",
+            "accounts": ["banned1.near", "banned2.near", "spam.near"]
+          }
+        },
+        {
+          "type": "logic",
+          "operator": "or",
+          "conditions": [
+            {
+              "type": "near_balance",
+              "operator": "gte",
+              "value": "100000000000000000000000000"
+            },
+            {
+              "type": "has_contract_on_account",
+              "operator": "gte",
+              "value": true
+            }
+          ]
+        }
+      ]
+    },
+    "defaultToken": "jambo-1679.meme-cooking.near",
+    "tokenSymbol": "JAMBO",
+    "tokenDecimals": 18,
+    "minTipAmount": 1,
+    "adminUsers": ["vadim.near"]
+  },

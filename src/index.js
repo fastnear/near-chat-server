@@ -21,6 +21,18 @@ import { getKeyPairFromPrivateKey, signMessage, getPublicKeyFromKeyPair } from "
 import { ServerEventSystem } from "./server-events.js";
 import { configManager } from "../shared/config-manager.js";
 
+// Initialize config source based on environment (if explicitly set)
+if (process.env.CONFIG_SOURCE) {
+  const CONFIG_SOURCE = process.env.CONFIG_SOURCE;
+  if (['file', 'smart_contract', 'file_and_smart_contract'].includes(CONFIG_SOURCE)) {
+    configManager.setConfigSource(CONFIG_SOURCE);
+    console.log(`🔧 ConfigManager: Using config source from ENV: ${CONFIG_SOURCE}`);
+  } else {
+    console.warn(`⚠️  Invalid CONFIG_SOURCE: ${CONFIG_SOURCE}, using default`);
+  }
+}
+console.log(`🔧 ConfigManager: Active config source: ${configManager.getConfigSource()}`);
+
 const MAX_HISTORY = 1000;
 const MAX_CHANNEL_LENGTH = 64;
 const GLOBAL_MESSAGE_QUEUE_SIZE = 1000000;
