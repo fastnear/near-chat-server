@@ -178,12 +178,24 @@ class TipBot extends BaseBot {
         const errorReason = result.result?.reason || 'Unknown error';
         console.log(`🎯 TIP-BOT: Intent publish failed:`, errorReason);
 
-        // Send error message to channel
-        this.sendTipMessage(
-          pendingIntent.channelId,
-          `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: ${errorReason}`,
-          pendingIntent.replyTo
-        );
+        // Check if it's a public key not found error
+        if (errorReason.includes("public key") && errorReason.includes("doesn't exist")) {
+          // Send request to server to notify user about adding key
+          this.sendMessage("request_add_key", {
+            contractId: process.env.INTENTS_CONTRACT_ID,
+            publicKey: signedIntent.signedMultiPayload.public_key,
+            accountId: pendingIntent.requester,
+            recipientOnly: true
+          });
+        }
+        else {
+          // Send error message to channel
+          this.sendTipMessage(
+            pendingIntent.channelId,
+            `❌ Tip from ${pendingIntent.requester} to ${pendingIntent.recipient} failed: ${errorReason}`,
+            pendingIntent.replyTo
+          );
+        }
       }
     } catch (error) {
       console.error(`🎯 TIP-BOT: Error publishing intent:`, error);

@@ -1092,6 +1092,55 @@ function loadState() {
     console.log(`✅ Tip intent ${intentId} stored for ${requester} -> ${recipient}: ${humanAmount}`);
   };
 
+  const handleRequestAddKey = async (ws, data, signedData) => {
+    const { contractId, publicKey, accountId, recipientOnly } = data;
+    const client = wsClients.get(ws);
+
+    // Only bots can request add key
+    if (!client?.isBot) {
+      throw new Error("Only bots can request add key");
+    }
+
+    // Validate required fields
+    if (!contractId || typeof contractId !== 'string' || contractId.trim() === '') {
+      throw new Error("contractId field must be a non-empty string");
+    }
+    if (!publicKey || typeof publicKey !== 'string' || publicKey.trim() === '') {
+      throw new Error("publicKey field must be a non-empty string");
+    }
+    if (!accountId || typeof accountId !== 'string' || accountId.trim() === '') {
+      throw new Error("accountId field must be a non-empty string");
+    }
+
+    console.log(`Add key requested for account: ${accountId}`);
+
+    // Find the user who needs to add the key
+    const userClient = [...wsClients.entries()].find(([ws, client]) => {
+      return client.accountId === accountId;
+    });
+
+    if (userClient) {
+      const [userWs] = userClient;
+      try {
+        const addKeyMessage = {
+          type: "add_key_required",
+          data: {
+            contractId,
+            publicKey,
+            accountId,
+            recipientOnly: recipientOnly || true
+          }
+        };
+        console.log("Sending add_key_required to", accountId);
+        userWs.send(JSON.stringify(addKeyMessage));
+      } catch (e) {
+        console.log("Failed to send add key message to user", e);
+      }
+    } else {
+      console.log(`User client not found for account: ${accountId}`);
+    }
+  };
+
   const handleSignedIntent = async (ws, data, signedData) => {
     const { intentId, signedIntent } = data;
     const { accountId } = data.metadata;
@@ -1593,6 +1642,22 @@ function loadState() {
         const data = await validateDataAndSignature(signedData);
         data.client = wsClients.get(ws);
 
+        // Check bot permissions for special actions
+        const client = wsClients.get(ws);
+        const standardActions = [
+          "register_bot", "join", "leave", "message", "delete_message",
+          "history", "members", "available_channels", "signed_intent",
+          "reaction", "pin_message", "pinned_messages", "reaction_details"
+        ];
+
+        if (client?.isBot && !standardActions.includes(data.action)) {
+          const botConfig = await getBotConfig(client.botId);
+          if (!botConfig?.allowedRequestTypes?.includes(data.action)) {
+            console.log("FFF", botConfig?.allowedRequestTypes);
+            throw new Error(`Bot ${client.botId} is not allowed to perform action: ${data.action}`);
+          }
+        }
+
         switch (data.action) {
           case "register_bot":
             await handleRegisterBot(ws, data, signedData);
@@ -1618,9 +1683,7 @@ function loadState() {
           case "available_channels":
             handleAvailableChannels(ws, data, signedData);
             break;
-          case "request_tip_intent":
-            await handleRequestTipIntent(ws, data, signedData);
-            break;
+          // message with the signed intent after user signs it on a web app
           case "signed_intent":
             await handleSignedIntent(ws, data, signedData);
             break;
@@ -1635,6 +1698,13 @@ function loadState() {
             break;
           case "reaction_details":
             await handleReactionDetails(ws, data, signedData);
+            break;
+          
+          case "request_tip_intent":
+            await handleRequestTipIntent(ws, data, signedData);
+            break;
+          case "request_add_key":
+            await handleRequestAddKey(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");

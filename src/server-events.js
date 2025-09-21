@@ -89,7 +89,7 @@ export class ServerEventSystem {
     let eventsSent = 0;
     for (const [ws, client] of this.wsClients.entries()) {
       if (client.isBot && client.channels && client.channels.has(channelId)) {
-        const botConfig = getBotConfig(client.botId);
+        const botConfig = await getBotConfig(client.botId);
         console.log(`🎯 SERVER: Checking bot ${client.botId} for event ${eventType}, allowedEvents:`, botConfig?.allowedServerEvents);
         if (botConfig?.allowedServerEvents?.includes(eventType)) {
           try {

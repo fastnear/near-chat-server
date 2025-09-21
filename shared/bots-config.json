@@ -10,7 +10,8 @@
     },
     "enabled": true,
     "allowedRequestSignedIntent": true,
-    "allowedServerEvents": ["tip_status_update", "storage_required", "intent_created"]
+    "allowedServerEvents": ["tip_status_update", "storage_required", "intent_created"],
+    "allowedRequestTypes": ["request_tip_intent", "request_add_key"]
   },
   "gpt-bot": {
     "name": "GPT Assistant",
@@ -23,6 +24,7 @@
     },
     "enabled": true,
     "allowedRequestSignedIntent": false,
-    "allowedServerEvents": ["channel_activity"]
+    "allowedServerEvents": ["channel_activity"],
+    "allowedRequestTypes": []
   }
 }
