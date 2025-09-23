@@ -37,8 +37,9 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 ### Shared Components (`shared/`)
 - **`config-manager.js`** - Centralized configuration management (ready for smart contract integration)
 - **`near.js`** - NEAR Protocol integration (signature verification, account validation, access keys)
-- **`channels-config.json`** - Channel settings, access rules, admin users
+- **`channels-config.json`** - Channel settings, access rules, admin users, miniapp bot configurations
 - **`bots-config.json`** - Bot configurations with permissions (allowedRequestSignedIntent, allowedServerEvents)
+- **`base-bot.js`** - Base class for NEAR chat bots with common functionality including miniapp support, WebSocket handling, message processing, and webapp compression/caching
 
 ### Bot System (Independent Architecture)
 - Bots run as fully independent processes in separate directories: `bots/tip-bot/`, `bots/gpt-bot/`
@@ -61,6 +62,7 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 - **Message Deletion** - Users can delete own messages, admins can delete any
 - **Bot Integration** - Pluggable bot system with process management
 - **Member Tracking** - Channel member lists with human/bot distinction
+- **Miniapp System** - Bots can provide compressed webapp bundles that render in channels
 
 ### WebSocket Message Types
 - `message` - Send chat message
@@ -86,3 +88,4 @@ The server uses ES modules throughout and stores state in JSON files in the `res
 - **Channel ID Requirement** - Every data message sent to the webapp for display must include `channelId` field
 - **No New Entities** - Do not introduce new configuration entities, fields, or concepts without explicit user request. Stick to existing architecture patterns
 - **Use Existing Systems** - Do not create duplicate functionality. Use existing signature verification, message handling, and authentication systems that are already implemented
+- **CRITICAL SECURITY RULE** - ALL WebSocket messages (including bot responses) MUST be signed with NEAR signatures. NEVER skip signature validation or create security bypasses. Bots must sign ALL their messages, including internal responses like `miniapp_response`.

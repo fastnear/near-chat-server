@@ -8,6 +8,16 @@
     "tokenSymbol": "WNEAR",
     "tokenDecimals": 24,
     "adminUsers": ["vadim.near", "zavodil.near"]
+  },
+  "timeapp": {
+    "name": "Time App Demo",
+    "description": "Demo channel with time miniapp",
+    "isPublic": true,
+    "rules": [],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "miniappBot": "time-bot"
   },  
   "whales": {
     "name": "Whales",

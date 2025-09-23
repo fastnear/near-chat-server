@@ -26,5 +26,19 @@
     "allowedRequestSignedIntent": false,
     "allowedServerEvents": ["channel_activity"],
     "allowedRequestTypes": []
+  },
+  "time-bot": {
+    "name": "Time Bot",
+    "displayName": "@timebot",
+    "accountId": "ai-is-near.near",
+    "channels": ["timeapp"],
+    "filters": {
+      "commands": ["/time"],
+      "mentions": ["@timebot"]
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response"]
   }
 }

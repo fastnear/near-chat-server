@@ -20,6 +20,7 @@ import { loadBotsConfig, isValidBot, getBotsForMessage, getBotConfig, getAllBots
 import { getKeyPairFromPrivateKey, signMessage, getPublicKeyFromKeyPair } from "../shared/near.js";
 import { ServerEventSystem } from "./server-events.js";
 import { configManager } from "../shared/config-manager.js";
+import { processMiniAppArchive } from "./webapp-processor.js";
 
 // Initialize config source based on environment (if explicitly set)
 if (process.env.CONFIG_SOURCE) {
@@ -579,6 +580,70 @@ function loadState() {
     return createdMessageNonce;
   };
 
+  const getBotAccountIdFromBotId = async (botId) => {
+    try {
+      const botConfig = await getBotConfig(botId);
+      return botConfig ? botConfig.accountId : null;
+    } catch (error) {
+      console.error(`Error getting bot config for ${botId}:`, error);
+      return null;
+    }
+  };
+
+
+  // Store pending miniapp requests
+  const pendingMiniappRequests = new Map(); // requestId -> { resolve, timeoutId }
+
+  const requestMiniappFromBot = async (botId, channelId, timeout = 5000) => {
+    try {
+      console.log(`🔄 Requesting miniapp from bot ${botId} for channel ${channelId}`);
+
+      // Find bot WebSocket connection
+      const botWs = Array.from(wsClients.keys()).find(ws => {
+        const client = wsClients.get(ws);
+        return client && client.isBot && client.accountId === botId;
+      });
+
+      if (!botWs || botWs.readyState !== 1) {
+        console.log(`❌ Bot ${botId} not connected or ready`);
+        return null;
+      }
+
+      const requestId = uuidv4();
+      const request = {
+        type: 'request_miniapp',
+        requestId,
+        channelId,
+        timestamp: Date.now()
+      };
+
+      return new Promise((resolve) => {
+        // Set timeout
+        const timeoutId = setTimeout(() => {
+          console.log(`⏰ Miniapp request to ${botId} timed out`);
+          pendingMiniappRequests.delete(requestId);
+          resolve(null);
+        }, timeout);
+
+        // Store pending request
+        pendingMiniappRequests.set(requestId, { resolve, timeoutId });
+
+        // Send request
+        try {
+          botWs.send(JSON.stringify(request));
+        } catch (error) {
+          clearTimeout(timeoutId);
+          pendingMiniappRequests.delete(requestId);
+          console.error(`Error sending miniapp request to ${botId}:`, error);
+          resolve(null);
+        }
+      });
+    } catch (error) {
+      console.error(`Error requesting miniapp from bot ${botId}:`, error);
+      return null;
+    }
+  };
+
   const handleJoin = async (ws, req, data, signedData) => {
     const client = data.client;
     const channelId = data.channelId;
@@ -642,13 +707,46 @@ function loadState() {
     const isChannelModerator = channelConfig && channelConfig.adminUsers &&
                                channelConfig.adminUsers.includes(accountId);
 
+    // Check if channel has a miniapp bot configured
+    let miniAppData = null;
+    if (channelConfig && channelConfig.miniappBot) {
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (botAccountId) {
+        console.log(`🤖 Channel ${channelId} has miniapp bot: ${botAccountId}`);
+        const rawMiniAppData = await requestMiniappFromBot(botAccountId, channelId);
+
+        if (rawMiniAppData) {
+          try {
+            // Process the archive to get ready HTML content
+            const htmlContent = processMiniAppArchive(rawMiniAppData.data);
+
+            // Create new format with htmlContent instead of data
+            miniAppData = {
+              botId: rawMiniAppData.botId,
+              htmlContent: htmlContent,
+              version: rawMiniAppData.version,
+              permissions: rawMiniAppData.permissions,
+              lastUpdated: rawMiniAppData.lastUpdated
+            };
+
+            console.log(`✅ Processed mini-app archive for ${botAccountId}`);
+          } catch (error) {
+            console.error(`❌ Failed to process mini-app archive from ${botAccountId}:`, error);
+            // Don't send miniAppData if processing fails
+            miniAppData = null;
+          }
+        }
+      }
+    }
+
     try {
       ws.send(JSON.stringify({
         type: "join_success",
         data: {
           channelId: channelId,
           isChannelModerator: isChannelModerator || false,
-          accountId: accountId
+          accountId: accountId,
+          miniApp: miniAppData
         }
       }));
     } catch (e) {
@@ -1138,6 +1236,30 @@ function loadState() {
       }
     } else {
       console.log(`User client not found for account: ${accountId}`);
+    }
+  };
+
+  const handleMiniappResponse = (data) => {
+    const { requestId, error, data: responseData } = data;
+
+    // Find pending request
+    const pendingRequest = pendingMiniappRequests.get(requestId);
+    if (!pendingRequest) {
+      console.log(`No pending miniapp request found for requestId: ${requestId}`);
+      return;
+    }
+
+    // Clean up
+    clearTimeout(pendingRequest.timeoutId);
+    pendingMiniappRequests.delete(requestId);
+
+    // Resolve the promise
+    if (error) {
+      console.log(`❌ Bot returned miniapp error: ${error}`);
+      pendingRequest.resolve(null);
+    } else {
+      console.log(`✅ Received miniapp data from bot`);
+      pendingRequest.resolve(responseData);
     }
   };
 
@@ -1636,7 +1758,7 @@ function loadState() {
     });
 
     ws.on("message", async (dataString) => {
-      try {        
+      try {
         const signedData = JSON.parse(dataString);
         console.log("WS Message", clientId, signedData);
         const data = await validateDataAndSignature(signedData);
@@ -1705,6 +1827,9 @@ function loadState() {
             break;
           case "request_add_key":
             await handleRequestAddKey(ws, data, signedData);
+            break;
+          case "miniapp_response":
+            handleMiniappResponse(data);
             break;
           default:
             throw new Error("Invalid action");
