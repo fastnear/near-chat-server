@@ -27,7 +27,8 @@
     "defaultToken": "",
     "tokenSymbol": "",
     "tokenDecimals": 24,
-    "miniappBot": "quiz-bot"
+    "miniappBot": "quiz-bot",
+    "miniappInitialHeight": 250
   },  
   "whales": {
     "name": "Whales",

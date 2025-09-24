@@ -8,64 +8,54 @@
 </head>
 <body>
     <div class="container">
+        <!-- Compact Header -->
         <header>
-            <h1>🧠 Quiz Bot</h1>
-            <p>Test your knowledge and compete with others!</p>
+            <div class="header-content">
+                <h1>🧠 Quiz</h1>
+                <div class="controls">
+                    <button id="refresh-btn" class="btn-icon" title="Refresh">🔄</button>
+                </div>
+            </div>
         </header>
 
-        <div class="tabs">
-            <button class="tab-button active" data-tab="current">Current Question</button>
-            <button class="tab-button" data-tab="leaderboard">Leaderboard</button>
-            <button class="tab-button" data-tab="history">History</button>
-        </div>
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Question Section (left) -->
+            <div class="question-section">
+                <div id="current-question">
+                    <div class="no-question">
+                        <p>No active quiz question</p>
+                        <p>Send any message in chat to start!</p>
+                    </div>
+                </div>
+            </div>
 
-        <div class="tab-content">
-            <!-- Current Question Tab -->
-            <div id="current" class="tab-pane active">
-                <div class="question-section">
-                    <div id="current-question">
-                        <div class="no-question">
-                            <p>No active quiz question</p>
-                            <p>Send any message in chat to start the quiz!</p>
+            <!-- Sidebar (right) -->
+            <div class="sidebar">
+                <!-- Tab Navigation -->
+                <div class="tab-nav">
+                    <button id="leaderboard-tab" class="tab-btn" data-tab="leaderboard">Leaderboard</button>
+                    <button id="rules-tab" class="tab-btn" data-tab="rules">Help</button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="tab-content">
+                    <div id="leaderboard-content" class="tab-panel">
+                        <div id="leaderboard-list">
+                            <div class="loading">Loading leaderboard...</div>
                         </div>
                     </div>
-                </div>
 
-                <div class="controls">
-                    <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
-                </div>
-            </div>
-
-            <!-- Leaderboard Tab -->
-            <div id="leaderboard" class="tab-pane">
-                <div class="leaderboard-section">
-                    <h3>🏆 Top Participants</h3>
-                    <div id="leaderboard-list">
-                        <div class="loading">Loading leaderboard...</div>
+                    <div id="rules-content" class="tab-panel">
+                        <ul>
+                            <li>Quiz starts when you send any message</li>
+                            <li>Type your answer in the chat</li>
+                            <li>Get 1 point for each correct answer</li>
+                            <li>New question appears after correct answer</li>
+                        </ul>
                     </div>
                 </div>
             </div>
-
-            <!-- History Tab -->
-            <div id="history" class="tab-pane">
-                <div class="history-section">
-                    <h3>📚 Question History</h3>
-                    <div id="history-list">
-                        <div class="loading">Loading history...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="instructions">
-            <h4>How to Play:</h4>
-            <ul>
-                <li>Quiz starts automatically when you send any message</li>
-                <li>Type your answer directly in the chat</li>
-                <li>Get 1 point for each correct answer</li>
-                <li>New question appears after correct answer</li>
-                <li>Check leaderboard in this webapp</li>
-            </ul>
         </div>
     </div>
 

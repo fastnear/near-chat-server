@@ -54,18 +54,34 @@ class QuizBot extends BaseBot {
     await super.handleMiniappRequest(message);
   }
 
+  // Clean question data for webapp (remove sensitive info)
+  cleanQuestionForWebapp(question) {
+    if (!question) return null;
+
+    return {
+      question: question.question,
+      startTime: question.startTime,
+      answered: question.answered
+      // Removed: correctAnswer, explanation (security)
+    };
+  }
+
   // Send webapp update to all channel participants
   async sendWebappUpdate(channelId, updateType, data) {
     try {
-      const updateData = {
-        type: updateType,
-        data: data,
-        timestamp: Date.now()
-      };
+      // Clean sensitive data from currentQuestion
+      const cleanData = { ...data };
+      if (cleanData.currentQuestion) {
+        cleanData.currentQuestion = this.cleanQuestionForWebapp(cleanData.currentQuestion);
+      }
 
       await this.sendMessage('webapp_update', {
         channelId,
-        updateData
+        updateData: {
+          type: updateType,
+          data: cleanData,
+          timestamp: Date.now()
+        }
       });
 
       console.log(`Quiz Bot: Sent webapp_update (${updateType}) to channel ${channelId}`);
@@ -136,7 +152,8 @@ class QuizBot extends BaseBot {
         for (const [channelId, channelData] of Object.entries(data)) {
           const state = {
             currentQuestion: channelData.currentQuestion,
-            leaderboard: channelData.leaderboard || {}
+            leaderboard: channelData.leaderboard || {},
+            questionHistory: channelData.questionHistory || []
           };
 
           // Restore answered Set if there's a current question
@@ -167,7 +184,8 @@ class QuizBot extends BaseBot {
             ...channelData.currentQuestion,
             answered: Array.from(channelData.currentQuestion.answered) // Convert Set to Array
           } : null,
-          leaderboard: channelData.leaderboard
+          leaderboard: channelData.leaderboard,
+          questionHistory: channelData.questionHistory || []
         };
       }
 
@@ -182,14 +200,15 @@ class QuizBot extends BaseBot {
     if (!this.quizState.has(channelId)) {
       this.quizState.set(channelId, {
         currentQuestion: null,
-        leaderboard: {} // accountId -> score
+        leaderboard: {}, // accountId -> score
+        questionHistory: [] // Array of previously asked questions (last 30)
       });
     }
     return this.quizState.get(channelId);
   }
 
   // Generate quiz question using OpenAI
-  async generateQuestion() {
+  async generateQuestion(channelId = null) {
     if (!OPENAI_API_KEY) {
       return {
         question: "What is the capital of the United States?",
@@ -199,7 +218,20 @@ class QuizBot extends BaseBot {
     }
 
     try {
-      const prompt = `Generate an completely random open-ended quiz question that has a simple, factual answer.
+      // Get previous questions to avoid repeats
+      const state = channelId ? this.getChannelQuizState(channelId) : null;
+      const previousQuestions = state?.questionHistory || [];
+
+      // Random topics to increase variety
+      const topics = [
+        "geography", "science", "technology", "history", "sports", "animals",
+        "food", "movies", "music", "literature", "mathematics", "astronomy",
+        "chemistry", "biology", "physics", "art", "culture", "languages",
+        "cryptocurrency", "blockchain", "programming", "space", "nature"
+      ];
+      const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+
+      let prompt = `Generate a completely random and unique quiz question about ${randomTopic} that has a simple, factual answer.
 
       Format your response as JSON with this exact structure:
       {
@@ -215,6 +247,12 @@ class QuizBot extends BaseBot {
 
       Make it factual and straightforward. Avoid complex answers.`;
 
+      // Add previous questions to avoid repeats
+      if (previousQuestions.length > 0) {
+        const recentQuestions = previousQuestions.slice(-10); // Last 10 questions
+        prompt += `\n\nIMPORTANT: DO NOT repeat these recent questions:\n${recentQuestions.map(q => `- "${q}"`).join('\n')}`;
+      }
+
       const response = await fetch(`${OPENAI_ENDPOINT}chat/completions`, {
         method: "POST",
         headers: {
@@ -226,7 +264,7 @@ class QuizBot extends BaseBot {
           messages: [
             {
               role: "system",
-              content: "You are a quiz generator. Always respond with valid JSON in the exact format requested."
+              content: "You are a creative quiz generator. Always respond with valid JSON in the exact format requested. Generate unique and varied questions."
             },
             {
               role: "user",
@@ -234,9 +272,10 @@ class QuizBot extends BaseBot {
             }
           ],
           max_tokens: OPENAI_MAX_TOKENS,
-          temperature: 0.9,
-          frequency_penalty: 0.5,
-          presence_penalty: 0.2
+          temperature: 1.1, // Increased for more creativity
+          frequency_penalty: 0.8, // Higher to avoid repetition
+          presence_penalty: 0.6, // Higher to encourage new topics
+          seed: Math.floor(Math.random() * 1000000) // Random seed for uniqueness
         }),
       });
 
@@ -270,7 +309,7 @@ class QuizBot extends BaseBot {
   // Start new quiz
   async startNewQuiz(channelId) {
     console.log(`Quiz Bot: Generating new question for ${channelId}`);
-    const question = await this.generateQuestion();
+    const question = await this.generateQuestion(channelId);
     console.log(`Quiz Bot: Generated question: "${question.question}" (answer: "${question.correctAnswer}")`);
 
     const state = this.getChannelQuizState(channelId);
@@ -283,8 +322,14 @@ class QuizBot extends BaseBot {
       answered: new Set()
     };
 
+    // Add question to history (keep last 30)
+    state.questionHistory.push(question.question);
+    if (state.questionHistory.length > 30) {
+      state.questionHistory = state.questionHistory.slice(-30);
+    }
+
     this.saveQuizState();
-    console.log(`Quiz Bot: Saved new question state for ${channelId}`);
+    console.log(`Quiz Bot: Saved new question state for ${channelId} (history: ${state.questionHistory.length} questions)`);
 
     // Send webapp update for new question
     await this.sendWebappUpdate(channelId, 'new_question', {
@@ -418,7 +463,10 @@ class QuizBot extends BaseBot {
     const state = this.getChannelQuizState(channelId);
 
     // Send current state immediately (no delay)
-    await this.sendWebappUpdate(channelId, "initial_state", state);
+    await this.sendWebappUpdate(channelId, "initial_state", {
+      currentQuestion: state.currentQuestion,
+      leaderboard: state.leaderboard
+    });
     console.log(`Quiz Bot: Sent immediate webapp_update for user ${accountId} in ${channelId}`);
 
     // If no current question, generate one (same logic as initializeChannel)
