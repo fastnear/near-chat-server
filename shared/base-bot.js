@@ -174,27 +174,37 @@ export class BaseBot {
   handleMessage(message) {
     switch (message.type) {
       case "bot_registered":
+        // Sent by server after successful bot registration - confirms bot can start operations
         console.log(`${this.botId} registered successfully`);
         this.onBotRegistered();
         break;
 
       case "channel":
+        // Contains all channel-related events: join/leave/message/members etc.
+        // Main communication channel for chat interactions
         this.handleChannelMessage(message.data);
         break;
 
       case "error":
+        // Server error notifications - connection issues, invalid requests, etc.
         console.error(`${this.botId} server error:`, message.error);
         break;
 
       case "message_created":
+        // Sent when bot's own message is successfully created on server
+        // Contains real nonce assigned by server - used for message tracking/replies
         this.handleMessageCreated(message.data);
         break;
 
       case "server_identity":
+        // Server's NEAR account identity for signature verification
+        // Received on connection - enables verification of signed server events
         this.handleServerIdentity(message.data);
         break;
 
       case "request_miniapp":
+        // Server requests bot's webapp/miniapp data for channel integration
+        // Bot responds with compressed webapp bundle
         this.handleMiniappRequest(message).catch(error => {
           console.error(`${this.botId} error in handleMiniappRequest:`, error);
         });

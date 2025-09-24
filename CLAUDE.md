@@ -64,6 +64,10 @@ This is a WebSocket-based chat server for NEAR Protocol with the following core 
 - **Member Tracking** - Channel member lists with human/bot distinction
 - **Miniapp System** - Bots can provide compressed webapp bundles that render in channels
 
+### Terminology
+- **Webapp** - main chat UI that handles user authentication and sends messages to server via WebSocket
+- **Miniapp** - web interface of a specific bot in a channel. To enable bot miniapp display, add `"miniappBot": "quiz-bot"` to channel settings in `channels-config.json`
+
 ### WebSocket Message Types
 - `message` - Send chat message
 - `join` - Join channel
@@ -89,3 +93,4 @@ The server uses ES modules throughout and stores state in JSON files in the `res
 - **No New Entities** - Do not introduce new configuration entities, fields, or concepts without explicit user request. Stick to existing architecture patterns
 - **Use Existing Systems** - Do not create duplicate functionality. Use existing signature verification, message handling, and authentication systems that are already implemented
 - **CRITICAL SECURITY RULE** - ALL WebSocket messages (including bot responses) MUST be signed with NEAR signatures. NEVER skip signature validation or create security bypasses. Bots must sign ALL their messages, including internal responses like `miniapp_response`.
+- **NO MOCK DATA OR STUBS** - NEVER write mock data, stubs, or placeholder implementations. Always implement functionality completely. If implementation approach is unclear, ask the user for clarification instead of creating fake/temporary solutions. Real functionality must be working from the start.

@@ -19,6 +19,16 @@
     "tokenDecimals": 24,
     "miniappBot": "time-bot"
   },  
+  "quizapp": {
+    "name": "Quiz App Demo",
+    "description": "Demo channel with Quiz miniapp",
+    "isPublic": true,
+    "rules": [],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "miniappBot": "quiz-bot"
+  },  
   "whales": {
     "name": "Whales",
     "description": "For NEAR holders with 1000+ Native NEAR",

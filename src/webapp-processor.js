@@ -159,6 +159,13 @@ window.addEventListener('message', (event) => {
       detail: event.data.payload
     }));
     console.log('MiniApp: miniapp-init event dispatched');
+  } else if (event.data.type === 'webapp_update') {
+    console.log('MiniApp: Received webapp_update message', event.data.payload);
+    // Dispatch as DOM event for the quiz app to handle
+    window.dispatchEvent(new CustomEvent('webapp-update', {
+      detail: event.data.payload
+    }));
+    console.log('MiniApp: webapp-update event dispatched');
   } else {
     console.log('MiniApp: Received message', event.data);
   }

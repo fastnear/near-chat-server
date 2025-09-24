@@ -36,9 +36,23 @@
       "commands": ["/time"],
       "mentions": ["@timebot"]
     },
-    "enabled": true,
+    "enabled": false,
     "allowedRequestSignedIntent": false,
     "allowedServerEvents": [],
     "allowedRequestTypes": ["miniapp_response"]
+  },
+  "quiz-bot": {
+    "name": "Quiz Bot",
+    "displayName": "@quizbot",
+    "accountId": "ai-is-near.near",
+    "channels": ["quizapp"],
+    "filters": {
+      "commands": [],
+      "mentions": []
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response", "webapp_update"]
   }
 }

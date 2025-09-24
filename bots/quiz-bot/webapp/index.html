@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Bot</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧠 Quiz Bot</h1>
+            <p>Test your knowledge and compete with others!</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="current">Current Question</button>
+            <button class="tab-button" data-tab="leaderboard">Leaderboard</button>
+            <button class="tab-button" data-tab="history">History</button>
+        </div>
+
+        <div class="tab-content">
+            <!-- Current Question Tab -->
+            <div id="current" class="tab-pane active">
+                <div class="question-section">
+                    <div id="current-question">
+                        <div class="no-question">
+                            <p>No active quiz question</p>
+                            <p>Send any message in chat to start the quiz!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Leaderboard Tab -->
+            <div id="leaderboard" class="tab-pane">
+                <div class="leaderboard-section">
+                    <h3>🏆 Top Participants</h3>
+                    <div id="leaderboard-list">
+                        <div class="loading">Loading leaderboard...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="history" class="tab-pane">
+                <div class="history-section">
+                    <h3>📚 Question History</h3>
+                    <div id="history-list">
+                        <div class="loading">Loading history...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h4>How to Play:</h4>
+            <ul>
+                <li>Quiz starts automatically when you send any message</li>
+                <li>Type your answer directly in the chat</li>
+                <li>Get 1 point for each correct answer</li>
+                <li>New question appears after correct answer</li>
+                <li>Check leaderboard in this webapp</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

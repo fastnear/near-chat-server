@@ -260,7 +260,7 @@ function loadState() {
         const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
 
         if (isEmpty && isInactive) {
-          console.log(`🗑️ Cleaning up empty user channel: ${channelId} (inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes)`);
+          console.log(`🗑️ Cleaning up empty user channel: ${channelId} (created by ${channel.createdBy}). Reason: inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes`);
           channelsToDelete.push(channelId);
         }
       }
@@ -513,8 +513,8 @@ function loadState() {
       nonce: channel.nonce++,
     };
 
-    // Add isBot flag for join/left actions if it's a bot
-    if ((action === "joined" || action === "left" || action === "disconnected") && client.isBot) {
+    // Add isBot flag for all messages if it's from a bot
+    if (client.isBot) {
       update.isBot = true;
     }
 
@@ -751,6 +751,37 @@ function loadState() {
       }));
     } catch (e) {
       console.log("Failed to send join confirmation", e);
+    }
+
+    // Notify miniapp bot about new user joining (to send initial state)
+    if (channelConfig && channelConfig.miniappBot && !client.isBot) {
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (botAccountId) {
+        console.log(`🔔 Notifying miniapp bot ${botAccountId} about user ${accountId} joining channel ${channelId}`);
+
+        // Send user_joined event to the miniapp bot (as unsigned message)
+        const userJoinedEvent = {
+          type: "user_joined",
+          channelId: channelId,
+          accountId: accountId,
+          timestamp: Date.now()
+        };
+
+        // Find bot WebSocket connection
+        for (const [clientId, clientWs] of wsClients.entries()) {
+          const botClient = wsClients.get(clientWs);
+          if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+            try {
+              clientWs.send(JSON.stringify(userJoinedEvent));
+              console.log(`✅ Sent user_joined event to bot ${botAccountId}`);
+
+            } catch (error) {
+              console.error(`❌ Failed to send events to bot ${botAccountId}:`, error);
+            }
+            break;
+          }
+        }
+      }
     }
   };
 
@@ -1027,7 +1058,7 @@ function loadState() {
       } catch (e) {
         console.error(`❌ Failed to send startup notification to bot ${botId}:`, e);
       }
-    }, 500); // Небольшая задержка чтобы бот успел обработать server_identity
+    }, 500); // Small delay to allow bot to process server_identity
   };
 
   const handleMembers = async (ws, data, signedData) => {
@@ -1260,6 +1291,116 @@ function loadState() {
     } else {
       console.log(`✅ Received miniapp data from bot`);
       pendingRequest.resolve(responseData);
+    }
+  };
+
+  const handleWebappUpdate = async (data, signedData) => {
+    const { channelId, updateData } = data;
+    const { accountId } = data.metadata;
+
+    if (!channelId) {
+      console.error("webapp_update: channelId is required");
+      return;
+    }
+
+    const channel = channels.get(channelId);
+    if (!channel) {
+      console.error(`webapp_update: Channel ${channelId} not found`);
+      return;
+    }
+
+    // ✅ CRITICAL SECURITY: Verify bot signature for webapp_update
+    const client = Array.from(wsClients.values()).find(c => c.accountId === accountId);
+    if (!client || !client.isBot) {
+      console.error(`webapp_update: Only bots can send webapp_update, rejected from ${accountId}`);
+      return;
+    }
+
+    // Verify the bot is allowed to send updates for this channel
+    const botConfig = await getBotConfig(client.botId);
+    if (!botConfig || !botConfig.allowedRequestTypes?.includes('webapp_update')) {
+      console.error(`webapp_update: Bot ${client.botId} not allowed to send webapp_update`);
+      return;
+    }
+
+    // Verify bot has permission for this channel
+    if (!botConfig.channels?.includes(channelId)) {
+      console.error(`webapp_update: Bot ${client.botId} not configured for channel ${channelId}`);
+      return;
+    }
+
+    console.log(`✅ webapp_update signature and permissions verified for bot ${client.botId} in channel ${channelId}`);
+
+    // Create webapp update message for broadcast to all channel clients
+    const webappUpdateMessage = {
+      type: "webapp_update",
+      channelId: channelId,
+      data: updateData,
+      timestamp: Date.now()
+    };
+
+    // Broadcast to all channel clients (including webapps)
+    for (const [clientId, clientWs] of channel.clients) {
+      if (clientWs && clientWs.readyState === clientWs.OPEN) {
+        try {
+          clientWs.send(JSON.stringify(webappUpdateMessage));
+        } catch (e) {
+          console.error(`Failed to send webapp_update to client ${clientId}:`, e);
+        }
+      }
+    }
+
+    console.log(`webapp_update sent to ${channel.clients.size} clients in channel ${channelId}`);
+  };
+
+  const handleRequestData = async (ws, data, signedData) => {
+    const { type, payload } = data;
+    const { accountId } = data.metadata;
+
+    console.log(`🎯 Received request_data: ${type} from ${accountId}`);
+
+    if (type === 'request_miniapp_data') {
+      const { channelId, requestType, timestamp } = payload;
+
+      if (!channelId) {
+        console.error("request_miniapp_data: channelId is required");
+        return;
+      }
+
+      // Get channel config and miniapp bot
+      const channelConfig = await getChannelConfig(channelId);
+      if (!channelConfig || !channelConfig.miniappBot) {
+        console.log(`No miniapp bot configured for channel ${channelId}`);
+        return;
+      }
+
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (!botAccountId) {
+        console.log(`Bot account ID not found for ${channelConfig.miniappBot}`);
+        return;
+      }
+
+      // Find bot WebSocket and send user_joined event (existing logic)
+      for (const [clientWs, botClient] of wsClients.entries()) {
+        if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+          try {
+            // Send user_joined event to trigger data response
+            const userJoinedEvent = {
+              type: "user_joined",
+              channelId: channelId,
+              accountId: accountId,
+              requestType: requestType,
+              timestamp: timestamp
+            };
+
+            clientWs.send(JSON.stringify(userJoinedEvent));
+            console.log(`✅ Sent user_joined event to bot ${botAccountId} for request_data`);
+            break;
+          } catch (error) {
+            console.error(`❌ Failed to send user_joined to bot ${botAccountId}:`, error);
+          }
+        }
+      }
     }
   };
 
@@ -1830,6 +1971,12 @@ function loadState() {
             break;
           case "miniapp_response":
             handleMiniappResponse(data);
+            break;
+          case "webapp_update":
+            handleWebappUpdate(data, signedData);
+            break;
+          case "request_data":
+            handleRequestData(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");
