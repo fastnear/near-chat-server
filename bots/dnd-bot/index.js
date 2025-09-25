@@ -328,8 +328,8 @@ ${Object.entries(state.players).map(([id, p]) => `• ${id} (${p.class}) - ${p.h
     });
   }
 
-  // Start completely new adventure with fresh setting
-  async startNewAdventure(channelId) {
+  // Reset game after total party kill
+  async resetGameAfterTPK(channelId) {
     const state = this.getChannelGameState(channelId);
 
     // Clear everything and generate new setting
@@ -902,15 +902,33 @@ Type /join to enter the game and choose your character class in the miniapp abov
 
     console.log(`D&D Bot: ${accountId} wants to join adventure in ${channelId} as ${characterClass}`);
 
+    // Protection against duplicate join requests (within 1 second)
+    const joinKey = `${channelId}-${accountId}`;
+    const now = Date.now();
+    if (!this.lastJoinAttempts) {
+      this.lastJoinAttempts = new Map();
+    }
+
+    if (this.lastJoinAttempts.has(joinKey)) {
+      const lastAttempt = this.lastJoinAttempts.get(joinKey);
+      if (now - lastAttempt < 1000) { // 1 second cooldown
+        console.log(`D&D Bot: Ignoring duplicate join request from ${accountId} (too recent)`);
+        return;
+      }
+    }
+    this.lastJoinAttempts.set(joinKey, now);
+
     // Add small delay to prevent double-clicking issues
     await new Promise(resolve => setTimeout(resolve, 100));
 
     const result = this.addPlayerToGame(channelId, accountId, characterClass);
 
-    if (result.success) {
+    if (result.success && result.player) {
+      console.log("D&D Bot: Player added:", accountId, result.player);
+      const classInfo = DND_CLASSES[characterClass];
       const joinMsg = `${accountId} joins as a ${characterClass}! (${result.player.hp} HP)
 
-${DND_CLASSES[characterClass].description}
+${classInfo.description}
 
 ⚔️ Starting Equipment: ${result.player.equipment.join(', ')}
 💰 Starting Gold: ${result.player.gold}

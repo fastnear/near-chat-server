@@ -507,7 +507,7 @@ function loadState() {
   ) => {
     const { metadata, client } = clientIdentity;
     if (!metadata || !client) {
-      return console.error("Invalid client identity");
+      return console.error("Invalid client identity", metadata, client);
     }
 
     const update = {
