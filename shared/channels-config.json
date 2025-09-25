@@ -10,6 +10,7 @@
     "adminUsers": ["vadim.near", "zavodil.near"]
   },
   "timeapp": {
+    "enabled": false,
     "name": "Time App Demo",
     "description": "Demo channel with time miniapp",
     "isPublic": true,
@@ -20,7 +21,7 @@
     "miniappBot": "time-bot"
   },  
   "quizapp": {
-    "name": "Quiz App Demo",
+    "name": "Quiz App",
     "description": "Demo channel with Quiz miniapp",
     "isPublic": true,
     "rules": [],
@@ -29,6 +30,17 @@
     "tokenDecimals": 24,
     "miniappBot": "quiz-bot",
     "miniappInitialHeight": 250
+  },
+  "dnd": {
+    "name": "D&D App",
+    "description": "Join epic fantasy adventures with our AI Dungeon Master",
+    "isPublic": true,
+    "rules": [],
+    "defaultToken": "",
+    "tokenSymbol": "",
+    "tokenDecimals": 24,
+    "miniappBot": "dnd-bot",
+    "miniappInitialHeight": 300
   },  
   "whales": {
     "name": "Whales",

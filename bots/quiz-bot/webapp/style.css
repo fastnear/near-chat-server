@@ -251,3 +251,63 @@ header h1 {
         padding: 0;
     }
 }
+
+/* Answer History */
+.answer-history {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.history-item {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    border-left: 3px solid #10b981;
+}
+
+.history-item:last-child {
+    margin-bottom: 0;
+}
+
+.history-question {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.history-answer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    gap: 8px;
+}
+
+.answer-text {
+    font-size: 0.9rem;
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.answerer {
+    font-size: 0.75rem;
+    color: #475569;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+
+@media (max-width: 480px) {
+    .history-answer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .answerer {
+        font-size: 0.7rem;
+    }
+}

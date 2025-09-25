@@ -200,11 +200,31 @@ class QuizApp {
             `;
         } else {
             const question = this.quizData.currentQuestion;
+            const answerHistory = this.quizData.answerHistory || [];
             console.log('🧠 Quiz App: Displaying question:', question.question);
+
+            let historyHtml = '';
+            if (answerHistory.length > 0) {
+                historyHtml = `
+                    <div class="answer-history">
+                        ${answerHistory.map(item => `
+                            <div class="history-item">
+                                <div class="history-question">${item.question}</div>
+                                <div class="history-answer">
+                                    <span class="answer-text">Answer: <strong>${item.answer}</strong></span>
+                                    <span class="answerer">by ${item.answeredBy}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
             container.innerHTML = `
                 <div class="question-card">
                     <div class="question-text">${question.question}</div>
                 </div>
+                ${historyHtml}
             `;
         }
     }
@@ -246,6 +266,7 @@ class QuizApp {
         container.innerHTML = leaderboardHtml;
     }
 
+
     handleWebappUpdate(updateData) {
         console.log('🧠 Quiz App: Processing webapp update:', updateData);
 
@@ -255,6 +276,16 @@ class QuizApp {
             this.loadCurrentQuestion();
 
             // Update leaderboard if tab is active
+            const leaderboardPanel = document.getElementById('leaderboard-content');
+            if (leaderboardPanel && leaderboardPanel.classList.contains('active')) {
+                this.loadLeaderboard();
+            }
+        } else if (updateData.type === 'correct_answer') {
+            // Handle correct answer - just update data and reload
+            this.quizData = updateData.data;
+            this.loadCurrentQuestion();
+
+            // Update leaderboard
             const leaderboardPanel = document.getElementById('leaderboard-content');
             if (leaderboardPanel && leaderboardPanel.classList.contains('active')) {
                 this.loadLeaderboard();

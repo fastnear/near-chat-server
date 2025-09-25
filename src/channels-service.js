@@ -23,6 +23,10 @@ export const getAvailableChannels = async (accountId, channels = null, wsClients
   const channelsConfig = await configManager.getAllChannelsConfig();
   for (const [channelId, config] of Object.entries(channelsConfig)) {
     try {
+      // Skip disabled channels
+      if (config.enabled === false) {
+        continue;
+      }
       const hasAccess = await canUserAccessChannel(accountId, channelId);
       const showInDiscovery = config.showInDiscovery !== false; // Default to true if not specified
 
@@ -196,6 +200,11 @@ export const canUserAccessChannel = async (accountId, channelId) => {
   if (!config) {
     // If channel is not configured, allow access (user can create channels)
     return true;
+  }
+
+  // Disabled channels are not accessible
+  if (config.enabled === false) {
+    return false;
   }
 
   try {

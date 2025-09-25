@@ -249,41 +249,41 @@ function loadState() {
   };
   
   // Cleanup empty user-created channels
-  const cleanupEmptyChannels = () => {
-    const now = Date.now();
-    const channelsToDelete = [];
+  // const cleanupEmptyChannels = () => {
+  //   const now = Date.now();
+  //   const channelsToDelete = [];
 
-    for (const [channelId, channel] of channels.entries()) {
-      // Only cleanup user-created channels (have createdBy field)
-      if (channel.createdBy) {
-        const isEmpty = channel.clients.size === 0;
-        const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
+  //   for (const [channelId, channel] of channels.entries()) {
+  //     // Only cleanup user-created channels (have createdBy field)
+  //     if (channel.createdBy) {
+  //       const isEmpty = channel.clients.size === 0;
+  //       const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
 
-        if (isEmpty && isInactive) {
-          console.log(`🗑️ Cleaning up empty user channel: ${channelId} (created by ${channel.createdBy}). Reason: inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes`);
-          channelsToDelete.push(channelId);
-        }
-      }
-    }
+  //       if (isEmpty && isInactive) {
+  //         console.log(`🗑️ Cleaning up empty user channel: ${channelId} (created by ${channel.createdBy}). Reason: inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes`);
+  //         channelsToDelete.push(channelId);
+  //       }
+  //     }
+  //   }
 
-    // Delete the channels and remove from all user visit histories
-    for (const channelId of channelsToDelete) {
-      channels.delete(channelId);
+  //   // Delete the channels and remove from all user visit histories
+  //   for (const channelId of channelsToDelete) {
+  //     channels.delete(channelId);
 
-      // Remove this channel from all users' visit history
-      for (const [accountId, visitedChannels] of userChannelVisits.entries()) {
-        visitedChannels.delete(channelId);
-        // Clean up empty visit sets
-        if (visitedChannels.size === 0) {
-          userChannelVisits.delete(accountId);
-        }
-      }
-    }
-  };
+  //     // Remove this channel from all users' visit history
+  //     for (const [accountId, visitedChannels] of userChannelVisits.entries()) {
+  //       visitedChannels.delete(channelId);
+  //       // Clean up empty visit sets
+  //       if (visitedChannels.size === 0) {
+  //         userChannelVisits.delete(accountId);
+  //       }
+  //     }
+  //   }
+  // };
 
   // Run cleanup every minute
   setInterval(cleanupExpiredIntents, 60 * 1000);
-  setInterval(cleanupEmptyChannels, 2 * 60 * 1000); // Every 2 minutes
+  // setInterval(cleanupEmptyChannels, 2 * 60 * 1000); // Every 2 minutes
 
   loadBotsConfig();
   loadChannelsConfig();
@@ -1404,6 +1404,45 @@ function loadState() {
     }
   };
 
+  const handleCustomMessage = async (ws, data, signedData) => {
+    const { customMessage } = data;
+    const { accountId } = data.metadata;
+
+    console.log(`🎯 Received custom_message from ${accountId}:`, customMessage);
+
+    if (!customMessage || !customMessage.channelId) {
+      console.error("custom_message: channelId is required");
+      return;
+    }
+
+    // Get channel config and miniapp bot
+    const channelConfig = await getChannelConfig(customMessage.channelId);
+    if (!channelConfig || !channelConfig.miniappBot) {
+      console.log(`No miniapp bot configured for channel ${customMessage.channelId}`);
+      return;
+    }
+
+    const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+    if (!botAccountId) {
+      console.log(`Bot account ID not found for ${channelConfig.miniappBot}`);
+      return;
+    }
+
+    // Find bot WebSocket and send custom message
+    for (const [clientWs, botClient] of wsClients.entries()) {
+      if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+        try {
+          // Send custom message to bot (same format as in base-bot.js)
+          clientWs.send(JSON.stringify(customMessage));
+          console.log(`✅ Sent custom_message to bot ${botAccountId}:`, customMessage.type);
+          break;
+        } catch (error) {
+          console.error(`❌ Failed to send custom_message to bot ${botAccountId}:`, error);
+        }
+      }
+    }
+  };
+
   const handleSignedIntent = async (ws, data, signedData) => {
     const { intentId, signedIntent } = data;
     const { accountId } = data.metadata;
@@ -1977,6 +2016,9 @@ function loadState() {
             break;
           case "request_data":
             handleRequestData(ws, data, signedData);
+            break;
+          case "custom_message":
+            handleCustomMessage(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");

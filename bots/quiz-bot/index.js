@@ -121,13 +121,14 @@ class QuizBot extends BaseBot {
       console.log(`Quiz Bot: Sending initial webapp state to ${channelId}`);
       await this.sendWebappUpdate(channelId, 'initial_state', {
         currentQuestion: state.currentQuestion,
-        leaderboard: state.leaderboard
+        leaderboard: state.leaderboard,
+        answerHistory: state.answerHistory
       });
 
       // If there's already a current question, post it
       if (state.currentQuestion) {
         console.log(`Quiz Bot: Reposting existing question in ${channelId}: "${state.currentQuestion.question}"`);
-        const questionText = `🧠 **Quiz Question:**\n\n${state.currentQuestion.question}\n\nType your answer in the chat!`;
+        const questionText = `🧠 Quiz Question: ${state.currentQuestion.question}\n\nType your answer in the chat!`;
         await this.sendChannelMessage(channelId, questionText);
       } else {
         // Generate new question
@@ -153,7 +154,8 @@ class QuizBot extends BaseBot {
           const state = {
             currentQuestion: channelData.currentQuestion,
             leaderboard: channelData.leaderboard || {},
-            questionHistory: channelData.questionHistory || []
+            questionHistory: channelData.questionHistory || [],
+            answerHistory: channelData.answerHistory || []
           };
 
           // Restore answered Set if there's a current question
@@ -185,7 +187,8 @@ class QuizBot extends BaseBot {
             answered: Array.from(channelData.currentQuestion.answered) // Convert Set to Array
           } : null,
           leaderboard: channelData.leaderboard,
-          questionHistory: channelData.questionHistory || []
+          questionHistory: channelData.questionHistory || [],
+          answerHistory: channelData.answerHistory || []
         };
       }
 
@@ -201,7 +204,8 @@ class QuizBot extends BaseBot {
       this.quizState.set(channelId, {
         currentQuestion: null,
         leaderboard: {}, // accountId -> score
-        questionHistory: [] // Array of previously asked questions (last 30)
+        questionHistory: [], // Array of previously asked questions (last 30)
+        answerHistory: [] // Array of answered questions with answers and authors (last 5)
       });
     }
     return this.quizState.get(channelId);
@@ -334,10 +338,11 @@ class QuizBot extends BaseBot {
     // Send webapp update for new question
     await this.sendWebappUpdate(channelId, 'new_question', {
       currentQuestion: state.currentQuestion,
-      leaderboard: state.leaderboard
+      leaderboard: state.leaderboard,
+      answerHistory: state.answerHistory
     });
 
-    return `🧠 **Quiz Question:**\n\n${question.question}\n\nType your answer in the chat!`;
+    return `🧠 Quiz Question: ${question.question}\n\nType your answer in the chat!`;
   }
 
   // Check if answer is correct
@@ -363,10 +368,24 @@ class QuizBot extends BaseBot {
       state.leaderboard[accountId]++;
       this.saveQuizState();
 
-      // Send webapp update for leaderboard change
-      this.sendWebappUpdate(channelId, 'leaderboard_update', {
+      // Set last answer (only keep 1)
+      state.answerHistory = [{
+        question: currentQ.question,
+        answer: currentQ.correctAnswer,
+        explanation: currentQ.explanation,
+        answeredBy: accountId,
+        timestamp: Date.now()
+      }];
+
+      // Send webapp update for correct answer
+      this.sendWebappUpdate(channelId, 'correct_answer', {
         currentQuestion: state.currentQuestion,
-        leaderboard: state.leaderboard
+        leaderboard: state.leaderboard,
+        answerHistory: state.answerHistory,
+        correctAnswer: currentQ.correctAnswer,
+        explanation: currentQ.explanation,
+        answeredBy: accountId,
+        newScore: state.leaderboard[accountId]
       });
 
       return {
@@ -399,6 +418,21 @@ class QuizBot extends BaseBot {
     return `📊 **Leaderboard for ${channelId}**\n\n${leaderboardText}`;
   }
 
+  // Add reaction to a message
+  async addReaction(channelId, messageNonce, emoji) {
+    try {
+      await this.sendMessage('reaction', {
+        channelId,
+        messageNonce,
+        emoji,
+        reactionAction: 'add'
+      });
+      console.log(`Quiz Bot: Added reaction ${emoji} to message ${messageNonce} in ${channelId}`);
+    } catch (error) {
+      console.error(`Quiz Bot: Error adding reaction:`, error);
+    }
+  }
+
   // Handle channel messages
   async onChannelMessage(channelId, message, sender, nonce, action) {
     if (action !== "message" || !message) return;
@@ -423,6 +457,11 @@ class QuizBot extends BaseBot {
     if (result) {
       if (result.correct) {
         console.log(`Quiz Bot: ✅ Correct answer from ${sender.accountId}! New score: ${result.newScore}`);
+
+        // Add thumbs up reaction to correct answer
+        await this.addReaction(channelId, nonce, '👍');
+
+        // Send reply message for correct answer
         const responseText = `🎉 Correct, ${sender.accountId}! ${result.explanation}\n\n💯 Your score: ${result.newScore} point${result.newScore === 1 ? '' : 's'}`;
         await this.sendChannelMessage(channelId, responseText, nonce);
 
@@ -436,8 +475,21 @@ class QuizBot extends BaseBot {
         }
       } else {
         console.log(`Quiz Bot: ❌ Wrong answer from ${sender.accountId}: "${trimmed}" (correct: "${state.currentQuestion.correctAnswer}")`);
+
+        // Add crying reaction for wrong answers
+        await this.addReaction(channelId, nonce, '😢');
+
+        // Send temporary message that will be deleted after 5 seconds
         const responseText = `❌ Incorrect, ${sender.accountId}. Try again!`;
-        await this.sendChannelMessage(channelId, responseText, nonce);
+        const tempMessagePromise = this.sendChannelMessage(channelId, responseText, nonce);
+
+        // Delete the temporary message after 5 seconds
+        tempMessagePromise.then((messageData) => {
+          setTimeout(() => {
+            this.deleteMessage(channelId, messageData.nonce);
+            console.log(`Quiz Bot: Deleted temporary wrong answer message ${messageData.nonce} in ${channelId}`);
+          }, 5000);
+        });
       }
     } else {
       console.log(`Quiz Bot: Message "${trimmed}" from ${sender.accountId} not processed as quiz answer`);
@@ -465,7 +517,8 @@ class QuizBot extends BaseBot {
     // Send current state immediately (no delay)
     await this.sendWebappUpdate(channelId, "initial_state", {
       currentQuestion: state.currentQuestion,
-      leaderboard: state.leaderboard
+      leaderboard: state.leaderboard,
+      answerHistory: state.answerHistory
     });
     console.log(`Quiz Bot: Sent immediate webapp_update for user ${accountId} in ${channelId}`);
 

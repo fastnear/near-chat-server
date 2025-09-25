@@ -1,0 +1,39 @@
+{
+  "dnd": {
+    "players": {},
+    "deadPlayers": {
+      "kakoilogin.tg": {
+        "class": "Mage",
+        "maxHp": 8,
+        "gold": 80,
+        "equipment": [
+          "Magic Staff",
+          "Spell Tome",
+          "Mage Robes"
+        ],
+        "deathTime": 1758814204026
+      },
+      "hypewallet.near": {
+        "class": "Ranger",
+        "maxHp": 10,
+        "gold": 60,
+        "equipment": [
+          "Longbow",
+          "Quiver of Arrows",
+          "Forest Cloak"
+        ],
+        "deathTime": 1758814204026
+      }
+    },
+    "currentStory": "The Ranger, in a blind rage, grabs what they think is a hammer - but in this magical chaos, it's actually a glowing, unstable mana crystal shaped like a hammer. As they swing it at the Mage, the crystal shatters on the first impact, releasing a massive magical shockwave. The Mage is sent flying into the wall, barely conscious, while the Ranger is engulfed in the magical backlash. The room's magical wards begin to collapse around both of you as ancient artifacts fall from their pedestals, threatening to bury you both alive.\n\n📊 kakoilogin.tg: -1 HP, DIED (0/8 HP, 80 gold)\n\n📊 hypewallet.near: -3 HP, DIED (0/10 HP, 60 gold)\n\n🪦 All heroes have perished! The adventure ends in darkness...\nWaiting for new brave souls to begin a fresh quest...",
+    "gameActive": false,
+    "storyHistory": [
+      "Drawing upon your arcane knowledge, you attempt to conjure explosive power. Rather than modern dynamite, your magic summons a volatile sphere of arcane fire that begins to swell uncontrollably. The Ranger looks on in horror as the sphere pulsates with dangerous energy. You realize too late that the force of the explosion will be catastrophic within this confined space.\n\n📊 kakoilogin.tg: -2 HP (5/8 HP, 80 gold)\n\n📊 hypewallet.near: -2 HP (7/10 HP, 60 gold)",
+      "In your desperation, you grab a vial of what looks like royal blue elixir from your robes, assuming it to be the fantasy equivalent of cyanide. You chug it down, only to realize too late it was a potent mana potion. Your body convulses with uncontrolled magical energy. In your frenzy, you grab your sturdy magic staff, now glowing with excess power, and swing it wildly at the Ranger. The staff connects with a thunderous crack, sending a shockwave through the room and knocking the Ranger to the ground.\n\n📊 kakoilogin.tg: -2 HP (3/8 HP, 80 gold)\n\n📊 hypewallet.near: -2 HP (5/10 HP, 60 gold)",
+      "As the Ranger attempts to strike the Mage with a hammer, they realize they don't actually have one. In a desperate move, they grab a nearby rock and swing it wildly. The Mage, still reeling from the earlier magical mishaps, tries to dodge but stumbles. The rock strikes the Mage's shoulder, causing bruising and further knocking the Mage's staff out of reach. The impact also causes the Ranger to lose balance, tumbling into a nearby pile of unstable magical artifacts. The room trembles as the artifacts begin to glow ominously.\n\n📊 kakoilogin.tg: -1 HP (2/8 HP, 80 gold)\n\n📊 hypewallet.near: -1 HP (4/10 HP, 60 gold)",
+      "The Ranger, fueled by frustration, grabs a nearby wooden chair and begins swinging it wildly at the Mage. However, the chair, being ancient and brittle in this magical environment, shatters on the first swing. One of the chair's legs ricochets off a magical artifact, causing a chain reaction that sends sparks flying in all directions. Both the Ranger and Mage are caught in the magical discharge, taking further damage as the room becomes increasingly unstable.\n\n📊 kakoilogin.tg: -1 HP (1/8 HP, 80 gold)\n\n📊 hypewallet.near: -1 HP (3/10 HP, 60 gold)",
+      "The Ranger, in a blind rage, grabs what they think is a hammer - but in this magical chaos, it's actually a glowing, unstable mana crystal shaped like a hammer. As they swing it at the Mage, the crystal shatters on the first impact, releasing a massive magical shockwave. The Mage is sent flying into the wall, barely conscious, while the Ranger is engulfed in the magical backlash. The room's magical wards begin to collapse around both of you as ancient artifacts fall from their pedestals, threatening to bury you both alive.\n\n📊 kakoilogin.tg: -1 HP, DIED (0/8 HP, 80 gold)\n\n📊 hypewallet.near: -3 HP, DIED (0/10 HP, 60 gold)\n\n🪦 All heroes have perished! The adventure ends in darkness...\nWaiting for new brave souls to begin a fresh quest..."
+    ],
+    "turnCount": 6
+  }
+}

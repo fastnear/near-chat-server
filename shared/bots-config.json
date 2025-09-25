@@ -54,5 +54,19 @@
     "allowedRequestSignedIntent": false,
     "allowedServerEvents": [],
     "allowedRequestTypes": ["miniapp_response", "webapp_update"]
+  },
+  "dnd-bot": {
+    "name": "D&D Master",
+    "displayName": "@dnd-bot",
+    "accountId": "ai-is-near.near",
+    "channels": ["dnd"],
+    "filters": {
+      "commands": ["/join", "/reset"],
+      "mentions": ["@dnd-bot"]
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response", "webapp_update"]
   }
 }
