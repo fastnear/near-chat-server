@@ -44,7 +44,7 @@
   "quiz-bot": {
     "name": "Quiz Bot",
     "displayName": "@quizbot",
-    "accountId": "ai-is-near.near",
+    "accountId": "quiz.ai-is-near.near",
     "channels": ["quizapp"],
     "filters": {
       "commands": [],
@@ -58,7 +58,7 @@
   "dnd-bot": {
     "name": "D&D Master",
     "displayName": "@dnd-bot",
-    "accountId": "ai-is-near.near",
+    "accountId": "dnd.ai-is-near.near",
     "channels": ["dnd"],
     "filters": {
       "commands": ["/join", "/reset"],
