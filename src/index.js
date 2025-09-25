@@ -20,6 +20,7 @@ import { loadBotsConfig, isValidBot, getBotsForMessage, getBotConfig, getAllBots
 import { getKeyPairFromPrivateKey, signMessage, getPublicKeyFromKeyPair } from "../shared/near.js";
 import { ServerEventSystem } from "./server-events.js";
 import { configManager } from "../shared/config-manager.js";
+import { processMiniAppArchive } from "./webapp-processor.js";
 
 // Initialize config source based on environment (if explicitly set)
 if (process.env.CONFIG_SOURCE) {
@@ -248,41 +249,41 @@ function loadState() {
   };
   
   // Cleanup empty user-created channels
-  const cleanupEmptyChannels = () => {
-    const now = Date.now();
-    const channelsToDelete = [];
+  // const cleanupEmptyChannels = () => {
+  //   const now = Date.now();
+  //   const channelsToDelete = [];
 
-    for (const [channelId, channel] of channels.entries()) {
-      // Only cleanup user-created channels (have createdBy field)
-      if (channel.createdBy) {
-        const isEmpty = channel.clients.size === 0;
-        const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
+  //   for (const [channelId, channel] of channels.entries()) {
+  //     // Only cleanup user-created channels (have createdBy field)
+  //     if (channel.createdBy) {
+  //       const isEmpty = channel.clients.size === 0;
+  //       const isInactive = channel.lastActiveAt && (now - channel.lastActiveAt > EMPTY_CHANNEL_CLEANUP_MS);
 
-        if (isEmpty && isInactive) {
-          console.log(`🗑️ Cleaning up empty user channel: ${channelId} (inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes)`);
-          channelsToDelete.push(channelId);
-        }
-      }
-    }
+  //       if (isEmpty && isInactive) {
+  //         console.log(`🗑️ Cleaning up empty user channel: ${channelId} (created by ${channel.createdBy}). Reason: inactive for ${Math.round((now - channel.lastActiveAt) / 60000)} minutes`);
+  //         channelsToDelete.push(channelId);
+  //       }
+  //     }
+  //   }
 
-    // Delete the channels and remove from all user visit histories
-    for (const channelId of channelsToDelete) {
-      channels.delete(channelId);
+  //   // Delete the channels and remove from all user visit histories
+  //   for (const channelId of channelsToDelete) {
+  //     channels.delete(channelId);
 
-      // Remove this channel from all users' visit history
-      for (const [accountId, visitedChannels] of userChannelVisits.entries()) {
-        visitedChannels.delete(channelId);
-        // Clean up empty visit sets
-        if (visitedChannels.size === 0) {
-          userChannelVisits.delete(accountId);
-        }
-      }
-    }
-  };
+  //     // Remove this channel from all users' visit history
+  //     for (const [accountId, visitedChannels] of userChannelVisits.entries()) {
+  //       visitedChannels.delete(channelId);
+  //       // Clean up empty visit sets
+  //       if (visitedChannels.size === 0) {
+  //         userChannelVisits.delete(accountId);
+  //       }
+  //     }
+  //   }
+  // };
 
   // Run cleanup every minute
   setInterval(cleanupExpiredIntents, 60 * 1000);
-  setInterval(cleanupEmptyChannels, 2 * 60 * 1000); // Every 2 minutes
+  // setInterval(cleanupEmptyChannels, 2 * 60 * 1000); // Every 2 minutes
 
   loadBotsConfig();
   loadChannelsConfig();
@@ -512,8 +513,8 @@ function loadState() {
       nonce: channel.nonce++,
     };
 
-    // Add isBot flag for join/left actions if it's a bot
-    if ((action === "joined" || action === "left" || action === "disconnected") && client.isBot) {
+    // Add isBot flag for all messages if it's from a bot
+    if (client.isBot) {
       update.isBot = true;
     }
 
@@ -579,6 +580,70 @@ function loadState() {
     return createdMessageNonce;
   };
 
+  const getBotAccountIdFromBotId = async (botId) => {
+    try {
+      const botConfig = await getBotConfig(botId);
+      return botConfig ? botConfig.accountId : null;
+    } catch (error) {
+      console.error(`Error getting bot config for ${botId}:`, error);
+      return null;
+    }
+  };
+
+
+  // Store pending miniapp requests
+  const pendingMiniappRequests = new Map(); // requestId -> { resolve, timeoutId }
+
+  const requestMiniappFromBot = async (botId, channelId, timeout = 5000) => {
+    try {
+      console.log(`🔄 Requesting miniapp from bot ${botId} for channel ${channelId}`);
+
+      // Find bot WebSocket connection
+      const botWs = Array.from(wsClients.keys()).find(ws => {
+        const client = wsClients.get(ws);
+        return client && client.isBot && client.accountId === botId;
+      });
+
+      if (!botWs || botWs.readyState !== 1) {
+        console.log(`❌ Bot ${botId} not connected or ready`);
+        return null;
+      }
+
+      const requestId = uuidv4();
+      const request = {
+        type: 'request_miniapp',
+        requestId,
+        channelId,
+        timestamp: Date.now()
+      };
+
+      return new Promise((resolve) => {
+        // Set timeout
+        const timeoutId = setTimeout(() => {
+          console.log(`⏰ Miniapp request to ${botId} timed out`);
+          pendingMiniappRequests.delete(requestId);
+          resolve(null);
+        }, timeout);
+
+        // Store pending request
+        pendingMiniappRequests.set(requestId, { resolve, timeoutId });
+
+        // Send request
+        try {
+          botWs.send(JSON.stringify(request));
+        } catch (error) {
+          clearTimeout(timeoutId);
+          pendingMiniappRequests.delete(requestId);
+          console.error(`Error sending miniapp request to ${botId}:`, error);
+          resolve(null);
+        }
+      });
+    } catch (error) {
+      console.error(`Error requesting miniapp from bot ${botId}:`, error);
+      return null;
+    }
+  };
+
   const handleJoin = async (ws, req, data, signedData) => {
     const client = data.client;
     const channelId = data.channelId;
@@ -642,17 +707,81 @@ function loadState() {
     const isChannelModerator = channelConfig && channelConfig.adminUsers &&
                                channelConfig.adminUsers.includes(accountId);
 
+    // Check if channel has a miniapp bot configured
+    let miniAppData = null;
+    if (channelConfig && channelConfig.miniappBot) {
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (botAccountId) {
+        console.log(`🤖 Channel ${channelId} has miniapp bot: ${botAccountId}`);
+        const rawMiniAppData = await requestMiniappFromBot(botAccountId, channelId);
+
+        if (rawMiniAppData) {
+          try {
+            // Process the archive to get ready HTML content
+            const htmlContent = processMiniAppArchive(rawMiniAppData.data);
+
+            // Create new format with htmlContent instead of data
+            miniAppData = {
+              botId: rawMiniAppData.botId,
+              htmlContent: htmlContent,
+              version: rawMiniAppData.version,
+              permissions: rawMiniAppData.permissions,
+              lastUpdated: rawMiniAppData.lastUpdated
+            };
+
+            console.log(`✅ Processed mini-app archive for ${botAccountId}`);
+          } catch (error) {
+            console.error(`❌ Failed to process mini-app archive from ${botAccountId}:`, error);
+            // Don't send miniAppData if processing fails
+            miniAppData = null;
+          }
+        }
+      }
+    }
+
     try {
       ws.send(JSON.stringify({
         type: "join_success",
         data: {
           channelId: channelId,
           isChannelModerator: isChannelModerator || false,
-          accountId: accountId
+          accountId: accountId,
+          miniApp: miniAppData
         }
       }));
     } catch (e) {
       console.log("Failed to send join confirmation", e);
+    }
+
+    // Notify miniapp bot about new user joining (to send initial state)
+    if (channelConfig && channelConfig.miniappBot && !client.isBot) {
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (botAccountId) {
+        console.log(`🔔 Notifying miniapp bot ${botAccountId} about user ${accountId} joining channel ${channelId}`);
+
+        // Send user_joined event to the miniapp bot (as unsigned message)
+        const userJoinedEvent = {
+          type: "user_joined",
+          channelId: channelId,
+          accountId: accountId,
+          timestamp: Date.now()
+        };
+
+        // Find bot WebSocket connection
+        for (const [clientId, clientWs] of wsClients.entries()) {
+          const botClient = wsClients.get(clientWs);
+          if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+            try {
+              clientWs.send(JSON.stringify(userJoinedEvent));
+              console.log(`✅ Sent user_joined event to bot ${botAccountId}`);
+
+            } catch (error) {
+              console.error(`❌ Failed to send events to bot ${botAccountId}:`, error);
+            }
+            break;
+          }
+        }
+      }
     }
   };
 
@@ -929,7 +1058,7 @@ function loadState() {
       } catch (e) {
         console.error(`❌ Failed to send startup notification to bot ${botId}:`, e);
       }
-    }, 500); // Небольшая задержка чтобы бот успел обработать server_identity
+    }, 500); // Small delay to allow bot to process server_identity
   };
 
   const handleMembers = async (ws, data, signedData) => {
@@ -1138,6 +1267,179 @@ function loadState() {
       }
     } else {
       console.log(`User client not found for account: ${accountId}`);
+    }
+  };
+
+  const handleMiniappResponse = (data) => {
+    const { requestId, error, data: responseData } = data;
+
+    // Find pending request
+    const pendingRequest = pendingMiniappRequests.get(requestId);
+    if (!pendingRequest) {
+      console.log(`No pending miniapp request found for requestId: ${requestId}`);
+      return;
+    }
+
+    // Clean up
+    clearTimeout(pendingRequest.timeoutId);
+    pendingMiniappRequests.delete(requestId);
+
+    // Resolve the promise
+    if (error) {
+      console.log(`❌ Bot returned miniapp error: ${error}`);
+      pendingRequest.resolve(null);
+    } else {
+      console.log(`✅ Received miniapp data from bot`);
+      pendingRequest.resolve(responseData);
+    }
+  };
+
+  const handleWebappUpdate = async (data, signedData) => {
+    const { channelId, updateData } = data;
+    const { accountId } = data.metadata;
+
+    if (!channelId) {
+      console.error("webapp_update: channelId is required");
+      return;
+    }
+
+    const channel = channels.get(channelId);
+    if (!channel) {
+      console.error(`webapp_update: Channel ${channelId} not found`);
+      return;
+    }
+
+    // ✅ CRITICAL SECURITY: Verify bot signature for webapp_update
+    const client = Array.from(wsClients.values()).find(c => c.accountId === accountId);
+    if (!client || !client.isBot) {
+      console.error(`webapp_update: Only bots can send webapp_update, rejected from ${accountId}`);
+      return;
+    }
+
+    // Verify the bot is allowed to send updates for this channel
+    const botConfig = await getBotConfig(client.botId);
+    if (!botConfig || !botConfig.allowedRequestTypes?.includes('webapp_update')) {
+      console.error(`webapp_update: Bot ${client.botId} not allowed to send webapp_update`);
+      return;
+    }
+
+    // Verify bot has permission for this channel
+    if (!botConfig.channels?.includes(channelId)) {
+      console.error(`webapp_update: Bot ${client.botId} not configured for channel ${channelId}`);
+      return;
+    }
+
+    console.log(`✅ webapp_update signature and permissions verified for bot ${client.botId} in channel ${channelId}`);
+
+    // Create webapp update message for broadcast to all channel clients
+    const webappUpdateMessage = {
+      type: "webapp_update",
+      channelId: channelId,
+      data: updateData,
+      timestamp: Date.now()
+    };
+
+    // Broadcast to all channel clients (including webapps)
+    for (const [clientId, clientWs] of channel.clients) {
+      if (clientWs && clientWs.readyState === clientWs.OPEN) {
+        try {
+          clientWs.send(JSON.stringify(webappUpdateMessage));
+        } catch (e) {
+          console.error(`Failed to send webapp_update to client ${clientId}:`, e);
+        }
+      }
+    }
+
+    console.log(`webapp_update sent to ${channel.clients.size} clients in channel ${channelId}`);
+  };
+
+  const handleRequestData = async (ws, data, signedData) => {
+    const { type, payload } = data;
+    const { accountId } = data.metadata;
+
+    console.log(`🎯 Received request_data: ${type} from ${accountId}`);
+
+    if (type === 'request_miniapp_data') {
+      const { channelId, requestType, timestamp } = payload;
+
+      if (!channelId) {
+        console.error("request_miniapp_data: channelId is required");
+        return;
+      }
+
+      // Get channel config and miniapp bot
+      const channelConfig = await getChannelConfig(channelId);
+      if (!channelConfig || !channelConfig.miniappBot) {
+        console.log(`No miniapp bot configured for channel ${channelId}`);
+        return;
+      }
+
+      const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+      if (!botAccountId) {
+        console.log(`Bot account ID not found for ${channelConfig.miniappBot}`);
+        return;
+      }
+
+      // Find bot WebSocket and send user_joined event (existing logic)
+      for (const [clientWs, botClient] of wsClients.entries()) {
+        if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+          try {
+            // Send user_joined event to trigger data response
+            const userJoinedEvent = {
+              type: "user_joined",
+              channelId: channelId,
+              accountId: accountId,
+              requestType: requestType,
+              timestamp: timestamp
+            };
+
+            clientWs.send(JSON.stringify(userJoinedEvent));
+            console.log(`✅ Sent user_joined event to bot ${botAccountId} for request_data`);
+            break;
+          } catch (error) {
+            console.error(`❌ Failed to send user_joined to bot ${botAccountId}:`, error);
+          }
+        }
+      }
+    }
+  };
+
+  const handleCustomMessage = async (ws, data, signedData) => {
+    const { customMessage } = data;
+    const { accountId } = data.metadata;
+
+    console.log(`🎯 Received custom_message from ${accountId}:`, customMessage);
+
+    if (!customMessage || !customMessage.channelId) {
+      console.error("custom_message: channelId is required");
+      return;
+    }
+
+    // Get channel config and miniapp bot
+    const channelConfig = await getChannelConfig(customMessage.channelId);
+    if (!channelConfig || !channelConfig.miniappBot) {
+      console.log(`No miniapp bot configured for channel ${customMessage.channelId}`);
+      return;
+    }
+
+    const botAccountId = await getBotAccountIdFromBotId(channelConfig.miniappBot);
+    if (!botAccountId) {
+      console.log(`Bot account ID not found for ${channelConfig.miniappBot}`);
+      return;
+    }
+
+    // Find bot WebSocket and send custom message
+    for (const [clientWs, botClient] of wsClients.entries()) {
+      if (botClient && botClient.isBot && botClient.accountId === botAccountId) {
+        try {
+          // Send custom message to bot (same format as in base-bot.js)
+          clientWs.send(JSON.stringify(customMessage));
+          console.log(`✅ Sent custom_message to bot ${botAccountId}:`, customMessage.type);
+          break;
+        } catch (error) {
+          console.error(`❌ Failed to send custom_message to bot ${botAccountId}:`, error);
+        }
+      }
     }
   };
 
@@ -1636,7 +1938,7 @@ function loadState() {
     });
 
     ws.on("message", async (dataString) => {
-      try {        
+      try {
         const signedData = JSON.parse(dataString);
         console.log("WS Message", clientId, signedData);
         const data = await validateDataAndSignature(signedData);
@@ -1705,6 +2007,18 @@ function loadState() {
             break;
           case "request_add_key":
             await handleRequestAddKey(ws, data, signedData);
+            break;
+          case "miniapp_response":
+            handleMiniappResponse(data);
+            break;
+          case "webapp_update":
+            handleWebappUpdate(data, signedData);
+            break;
+          case "request_data":
+            handleRequestData(ws, data, signedData);
+            break;
+          case "custom_message":
+            handleCustomMessage(ws, data, signedData);
             break;
           default:
             throw new Error("Invalid action");

@@ -171,6 +171,12 @@ class ConfigManager {
       return false;
     }
 
+    // Check if the channel itself is enabled
+    const channelConfig = await this.getChannelConfig(channelId);
+    if (channelConfig && channelConfig.enabled === false) {
+      return false;
+    }
+
     const { filters } = botConfig;
     const messageText = message.toLowerCase();
 

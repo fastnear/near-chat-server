@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Adventure</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="header-content">
+                <h1>🎲 D&D Adventure</h1>
+                <div class="controls">
+                    <button class="btn-icon" id="refresh-btn" title="Refresh">🔄</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Story Section -->
+            <div class="story-section">
+                <!-- Game Status -->
+                <div id="game-status" class="game-status" style="display: none;">
+                    <div class="status-item">
+                        <span class="status-label">Turn:</span>
+                        <span id="turn-counter">0/20</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Danger:</span>
+                        <span id="danger-level">Level 1</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Players:</span>
+                        <span id="player-count">0</span>
+                    </div>
+                </div>
+
+                <div id="current-story">
+                    <div class="no-story">
+                        <p>🎲 Welcome, brave adventurer!</p>
+                        <p>Join the adventure to begin your quest...</p>
+                    </div>
+                </div>
+
+                <!-- Join Adventure Section -->
+                <div id="join-section" class="join-section">
+                    <div class="join-card">
+                        <h3>⚔️ Join the Adventure!</h3>
+                        <p>Choose your character class:</p>
+
+                        <div class="class-selection">
+                            <select id="class-dropdown" class="class-dropdown">
+                                <option value="">Select a class...</option>
+                                <option value="Warrior">⚔️ Warrior</option>
+                                <option value="Mage">🧙 Mage</option>
+                                <option value="Rogue">🗡️ Rogue</option>
+                                <option value="Ranger">🏹 Ranger</option>
+                                <option value="Cleric">⚕️ Cleric</option>
+                                <option value="Barbarian">🪓 Barbarian</option>
+                            </select>
+
+                            <div id="class-details" class="class-details" style="display: none;">
+                                <div class="class-info">
+                                    <div class="class-stats-line">
+                                        <span id="class-hp">0 HP</span> •
+                                        <span id="class-gold">0 💰</span>
+                                    </div>
+                                    <div id="class-description" class="class-description">Select a class to see details</div>
+                                    <div id="class-equipment" class="class-equipment">Equipment: None</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button id="join-btn" class="join-btn" disabled>
+                            Select a class to join
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="tab-nav">
+                    <button class="tab-btn active" data-tab="players">Heroes</button>
+                    <button class="tab-btn" data-tab="fallen">Fallen</button>
+                    <button class="tab-btn" data-tab="history">History</button>
+                </div>
+
+                <div class="tab-content">
+                    <div class="tab-panel active" id="players-content">
+                        <div id="players-list" class="players-list">
+                            <div class="loading">Loading heroes...</div>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="fallen-content">
+                        <div id="fallen-list" class="players-list">
+                            <div class="loading">No fallen heroes yet...</div>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="history-content">
+                        <div id="history-list" class="history-list">
+                            <div class="loading">Loading adventure history...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

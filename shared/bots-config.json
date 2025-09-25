@@ -26,5 +26,47 @@
     "allowedRequestSignedIntent": false,
     "allowedServerEvents": ["channel_activity"],
     "allowedRequestTypes": []
+  },
+  "time-bot": {
+    "name": "Time Bot",
+    "displayName": "@timebot",
+    "accountId": "ai-is-near.near",
+    "channels": ["timeapp"],
+    "filters": {
+      "commands": ["/time"],
+      "mentions": ["@timebot"]
+    },
+    "enabled": false,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response"]
+  },
+  "quiz-bot": {
+    "name": "Quiz Bot",
+    "displayName": "@quizbot",
+    "accountId": "ai-is-near.near",
+    "channels": ["quizapp"],
+    "filters": {
+      "commands": [],
+      "mentions": []
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response", "webapp_update"]
+  },
+  "dnd-bot": {
+    "name": "D&D Master",
+    "displayName": "@dnd-bot",
+    "accountId": "ai-is-near.near",
+    "channels": ["dnd"],
+    "filters": {
+      "commands": ["/join", "/reset"],
+      "mentions": ["@dnd-bot"]
+    },
+    "enabled": true,
+    "allowedRequestSignedIntent": false,
+    "allowedServerEvents": [],
+    "allowedRequestTypes": ["miniapp_response", "webapp_update"]
   }
 }

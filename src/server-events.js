@@ -59,6 +59,14 @@ export class ServerEventSystem {
   }
 
   async sendServerEvent(channelId, eventType, payload) {
+    // Don't send events for disabled channels
+    const { getChannelConfig } = await import('./channels-service.js');
+    const channelConfig = await getChannelConfig(channelId);
+    if (channelConfig && channelConfig.enabled === false) {
+      console.log(`🎯 SERVER: Skipping event ${eventType} for disabled channel ${channelId}`);
+      return;
+    }
+
     const eventData = {
       action: "server_event",
       channelId,

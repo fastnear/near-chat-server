@@ -1,6 +1,11 @@
 import WebSocket from "ws";
 import { getKeyPairFromPrivateKey, getPublicKeyFromKeyPair, signMessage, verifySignature } from "./near.js";
 import { configManager } from "./config-manager.js";
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createGzip } from 'zlib';
+import { promisify } from 'util';
 
 const CONTRACT_ID = "social.near";
 
@@ -25,6 +30,11 @@ export class BaseBot {
 
     // Configuration
     this.config = null;
+
+    // Miniapp cache
+    this.miniappCache = null;
+    this.miniappCacheTime = 0;
+    this.miniappCacheDuration = 10 * 60 * 1000; // 10 minutes
   }
 
   async loadConfig() {
@@ -164,24 +174,40 @@ export class BaseBot {
   handleMessage(message) {
     switch (message.type) {
       case "bot_registered":
+        // Sent by server after successful bot registration - confirms bot can start operations
         console.log(`${this.botId} registered successfully`);
         this.onBotRegistered();
         break;
 
       case "channel":
+        // Contains all channel-related events: join/leave/message/members etc.
+        // Main communication channel for chat interactions
         this.handleChannelMessage(message.data);
         break;
 
       case "error":
+        // Server error notifications - connection issues, invalid requests, etc.
         console.error(`${this.botId} server error:`, message.error);
         break;
 
       case "message_created":
+        // Sent when bot's own message is successfully created on server
+        // Contains real nonce assigned by server - used for message tracking/replies
         this.handleMessageCreated(message.data);
         break;
 
       case "server_identity":
+        // Server's NEAR account identity for signature verification
+        // Received on connection - enables verification of signed server events
         this.handleServerIdentity(message.data);
+        break;
+
+      case "request_miniapp":
+        // Server requests bot's webapp/miniapp data for channel integration
+        // Bot responds with compressed webapp bundle
+        this.handleMiniappRequest(message).catch(error => {
+          console.error(`${this.botId} error in handleMiniappRequest:`, error);
+        });
         break;
 
       default:
@@ -428,6 +454,163 @@ export class BaseBot {
 
   handleCustomMessage(message) {
     // Override in subclass for custom message types
+  }
+
+  /**
+   * Handle miniapp request from server
+   */
+  async handleMiniappRequest(message) {
+    try {
+      console.log(`${this.botId} handling miniapp request for channel: ${message.channelId}`);
+      const miniappData = await this.getMiniappData();
+
+      // Use sendMessage to properly sign the response
+      await this.sendMessage('miniapp_response', {
+        requestId: message.requestId,
+        channelId: message.channelId,
+        data: miniappData
+      });
+    } catch (error) {
+      console.error(`${this.botId} error handling miniapp request:`, error);
+
+      // Use sendMessage to properly sign the error response
+      await this.sendMessage('miniapp_response', {
+        requestId: message.requestId,
+        channelId: message.channelId,
+        error: 'Failed to load miniapp'
+      });
+    }
+  }
+
+  /**
+   * Get miniapp data with caching
+   */
+  async getMiniappData() {
+    const now = Date.now();
+
+    // Return cached data if still valid
+    if (this.miniappCache && (now - this.miniappCacheTime) < this.miniappCacheDuration) {
+      console.log(`${this.botId} returning cached miniapp data`);
+      return this.miniappCache;
+    }
+
+    console.log(`${this.botId} generating new miniapp data`);
+
+    // Generate new miniapp data
+    const webappPath = this.getWebappPath();
+
+    if (!fs.existsSync(webappPath)) {
+      throw new Error(`Webapp directory not found: ${webappPath}`);
+    }
+
+    const gzData = await this.compressWebapp(webappPath);
+
+    this.miniappCache = {
+      botId: this.botAccountId,
+      data: gzData,
+      version: this.getMiniappVersion(),
+      permissions: this.getMiniappPermissions(),
+      lastUpdated: now
+    };
+
+    this.miniappCacheTime = now;
+
+    return this.miniappCache;
+  }
+
+  /**
+   * Get webapp directory path - override in subclasses
+   */
+  getWebappPath() {
+    const __filename = fileURLToPath(import.meta.url);
+    const botDir = path.dirname(__filename);
+    return path.join(botDir, 'webapp');
+  }
+
+  /**
+   * Get miniapp version - override in subclasses
+   */
+  getMiniappVersion() {
+    return '1.0.0';
+  }
+
+  /**
+   * Get miniapp permissions - override in subclasses
+   */
+  getMiniappPermissions() {
+    return ['blockchain_read'];
+  }
+
+  /**
+   * Compress webapp directory into gz archive
+   */
+  async compressWebapp(webappPath) {
+    const files = await this.collectWebappFiles(webappPath);
+
+    // Create a simple archive format (could use tar later)
+    const archive = {
+      files: {}
+    };
+
+    for (const file of files) {
+      const relativePath = path.relative(webappPath, file);
+      const content = fs.readFileSync(file);
+
+      // Determine if file is binary
+      const isBinary = this.isBinaryFile(file);
+      archive.files[relativePath] = {
+        content: isBinary ? content.toString('base64') : content.toString('utf8'),
+        encoding: isBinary ? 'base64' : 'utf8'
+      };
+    }
+
+    const archiveString = JSON.stringify(archive);
+    const buffer = Buffer.from(archiveString);
+
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      const gzip = createGzip();
+
+      gzip.on('data', (chunk) => chunks.push(chunk));
+      gzip.on('end', () => {
+        const compressed = Buffer.concat(chunks);
+        resolve(compressed.toString('base64'));
+      });
+      gzip.on('error', reject);
+
+      gzip.end(buffer);
+    });
+  }
+
+  /**
+   * Recursively collect all files in webapp directory
+   */
+  async collectWebappFiles(dir) {
+    const files = [];
+    const items = fs.readdirSync(dir);
+
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      const stat = fs.statSync(fullPath);
+
+      if (stat.isDirectory()) {
+        const subFiles = await this.collectWebappFiles(fullPath);
+        files.push(...subFiles);
+      } else {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Check if file is binary
+   */
+  isBinaryFile(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const binaryExts = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.exe', '.bin'];
+    return binaryExts.includes(ext);
   }
 
   /**

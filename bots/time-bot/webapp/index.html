@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>⏰ Time App</h1>
+        <div class="time-display">
+            <div id="current-time" class="time"></div>
+            <div id="current-date" class="date"></div>
+        </div>
+
+        <div class="time-zones">
+            <h3>Time Zones</h3>
+            <div class="timezone-grid">
+                <div class="timezone-item">
+                    <label>New York</label>
+                    <div id="ny-time" class="timezone-time"></div>
+                </div>
+                <div class="timezone-item">
+                    <label>London</label>
+                    <div id="london-time" class="timezone-time"></div>
+                </div>
+                <div class="timezone-item">
+                    <label>Tokyo</label>
+                    <div id="tokyo-time" class="timezone-time"></div>
+                </div>
+                <div class="timezone-item">
+                    <label>UTC</label>
+                    <div id="utc-time" class="timezone-time"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="refresh-btn" class="btn">🔄 Refresh</button>
+            <button id="format-btn" class="btn">📅 Toggle Format</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
