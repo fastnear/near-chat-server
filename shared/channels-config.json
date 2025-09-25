@@ -29,7 +29,8 @@
     "tokenSymbol": "",
     "tokenDecimals": 24,
     "miniappBot": "quiz-bot",
-    "miniappInitialHeight": 250
+    "miniappInitialHeight": 250,    
+    "adminUsers": ["vadim.near", "zavodil.near"]
   },
   "dnd": {
     "name": "D&D App",
@@ -40,7 +41,8 @@
     "tokenSymbol": "",
     "tokenDecimals": 24,
     "miniappBot": "dnd-bot",
-    "miniappInitialHeight": 300
+    "miniappInitialHeight": 300,
+    "adminUsers": ["vadim.near", "zavodil.near"]
   },  
   "whales": {
     "name": "Whales",
