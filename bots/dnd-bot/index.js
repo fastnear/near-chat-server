@@ -296,16 +296,17 @@ The realm awaits your courage...`;
     state.gameActive = true;
 
     // Generate opening story
-    const story = await this.generateStory(channelId, "start");
-    state.currentStory = story;
-    state.storyHistory = [story];
+    const storyResult = await this.generateStory(channelId, "start");
+    const storyText = typeof storyResult === 'object' ? storyResult.story : storyResult;
+    state.currentStory = storyText;
+    state.storyHistory = [storyText];
 
     this.saveGameState();
 
     // Announce adventure start
     const startMsg = `🎲 The Adventure Begins! 🎲
 
-${story}
+${storyText}
 
 💡 How to play:
 • Describe what your character wants to do
@@ -343,17 +344,18 @@ ${Object.entries(state.players).map(([id, p]) => `• ${id} (${p.class}) - ${p.h
     this.saveGameState();
 
     // Generate new bloodthirsty setting
-    const newStory = await this.generateStory(channelId, "new_game_start");
+    const newStoryResult = await this.generateStory(channelId, "new_game_start");
+    const newStoryText = typeof newStoryResult === 'object' ? newStoryResult.story : newStoryResult;
 
-    state.currentStory = newStory.story || newStory;
-    state.storyHistory.push(state.currentStory);
+    state.currentStory = newStoryText;
+    state.storyHistory.push(newStoryText);
 
     this.saveGameState();
 
     // Notify players
     await this.sendChannelMessage(channelId, `🩸 A NEW NIGHTMARE BEGINS! 🩸
 
-${state.currentStory}
+${newStoryText}
 
 💀 Previous heroes have fallen, but death is just the beginning...
 ⚔️ Join this fresh hell - choose your doomed class and let's see how you die!`);
