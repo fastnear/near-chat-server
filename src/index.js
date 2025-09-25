@@ -221,6 +221,16 @@ function loadState() {
     }
   }
 
+  // Remove test users from userChannelVisits for development testing
+  const testUsersEnv = process.env.TEST_USERS_TO_RESET_ON_RESTART || '';
+  const testUsersToReset = testUsersEnv.split(',').map(u => u.trim()).filter(u => u.length > 0);
+  for (const testUser of testUsersToReset) {
+    if (userChannelVisits.has(testUser)) {
+      userChannelVisits.delete(testUser);
+      console.log(`🧪 Development: Reset visit history for test user: ${testUser}`);
+    }
+  }
+
   // Cleanup expired intents (5 minute timeout)
   const cleanupExpiredIntents = () => {
     const now = Date.now();
@@ -963,6 +973,7 @@ function loadState() {
           },
         }),
       );
+
     } catch (e) {
       console.log("Failed to send available channels", e);
     }

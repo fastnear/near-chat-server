@@ -502,6 +502,9 @@ class QuizBot extends BaseBot {
       case "user_joined":
         this.handleUserJoined(message);
         break;
+      case "user_active":
+        this.handleUserActive(message);
+        break;
       default:
         console.log(`Quiz Bot: Unknown custom message type: ${message.type}`);
     }
@@ -533,6 +536,22 @@ class QuizBot extends BaseBot {
         console.log(`Quiz Bot: Generated and sent new question for ${channelId}`);
       }, 100); // Very short delay just for question generation
     }
+  }
+
+  // Handle user becoming active (page refresh/reload) - send current state
+  async handleUserActive(message) {
+    const { channelId, accountId } = message;
+    console.log(`Quiz Bot: User ${accountId} became active in channel ${channelId}, sending current state`);
+
+    const state = this.getChannelQuizState(channelId);
+
+    // Send current state to refresh the miniapp
+    await this.sendWebappUpdate(channelId, "initial_state", {
+      currentQuestion: state.currentQuestion,
+      leaderboard: state.leaderboard,
+      answerHistory: state.answerHistory
+    });
+    console.log(`Quiz Bot: Sent webapp_update for active user ${accountId} in ${channelId}`);
   }
 
 }

@@ -133,7 +133,12 @@ class QuizApp {
 
     onMiniAppExpanded() {
         console.log('🧠 Quiz App: MiniApp expanded, requesting fresh data...');
-        this.requestDataRefresh();
+        // Only request refresh if we haven't sent ready signal yet (to avoid redundant requests)
+        if (!this.readySignalSent) {
+            this.requestDataRefresh();
+        } else {
+            console.log('🧠 Quiz App: Ready signal sent - waiting for webapp_update...');
+        }
     }
 
     requestDataRefresh() {

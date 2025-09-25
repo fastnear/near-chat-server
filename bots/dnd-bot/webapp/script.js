@@ -12,6 +12,7 @@ class DNDApp {
     init() {
         this.setupEventListeners();
         this.setupMiniAppIntegration();
+        this.sendReadySignal();
         this.loadGameData();
     }
 
@@ -158,7 +159,7 @@ class DNDApp {
         }
     }   
 
-    loadGameData() {
+    sendReadySignal() {
         // Send signal to bot about MiniApp loading
         if (window.parent && window.parent.postMessage && !this.readySignalSent) {
             console.log('🎲 D&D App: Sending miniapp_ready signal to parent...');
@@ -501,8 +502,13 @@ class DNDApp {
 
         // If no game data, request refresh
         if (!this.gameData) {
-            console.log('🎲 D&D App: No game data, requesting refresh...');
-            this.requestDataRefresh();
+            // Only request refresh if we haven't sent ready signal yet (to avoid redundant requests)
+            if (!this.readySignalSent) {
+                console.log('🎲 D&D App: No game data, requesting refresh...');
+                this.requestDataRefresh();
+            } else {
+                console.log('🎲 D&D App: No game data, but ready signal sent - waiting for webapp_update...');
+            }
             // Show loading state
             joinSection.innerHTML = '<div class="loading">🔄 Loading game data...</div>';
             return;

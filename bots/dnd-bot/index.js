@@ -817,6 +817,12 @@ Be dramatic, creative, and ruthlessly fair!`;
       case "join_adventure":
         this.handleJoinAdventure(message);
         break;
+      case "user_joined":
+        this.handleUserJoined(message);
+        break;
+      case "user_active":
+        this.handleUserActive(message);
+        break;
       default:
         console.log(`D&D Bot: Unknown custom message type: ${message.type}`);
     }
@@ -931,6 +937,42 @@ Welcome to the party, brave adventurer! Remember: use @dnd-bot to take actions!`
         console.log(`D&D Bot: Ignoring duplicate join attempt from ${accountId}`);
       }
     }
+  }
+
+  // Handle user joining channel - send initial state
+  async handleUserJoined(message) {
+    const { channelId, accountId } = message;
+    console.log(`D&D Bot: User ${accountId} joined channel ${channelId}, sending initial state`);
+
+    const state = this.getChannelGameState(channelId);
+
+    // Send current game state
+    await this.sendWebappUpdate(channelId, 'initial_state', {
+      players: state.players,
+      deadPlayers: state.deadPlayers,
+      currentStory: state.currentStory,
+      gameActive: state.gameActive,
+      turnCount: state.turnCount || 0
+    });
+    console.log(`D&D Bot: Sent initial state webapp_update for user ${accountId} in ${channelId}`);
+  }
+
+  // Handle user becoming active (page refresh/reload) - send current state
+  async handleUserActive(message) {
+    const { channelId, accountId } = message;
+    console.log(`D&D Bot: User ${accountId} became active in channel ${channelId}, sending current state`);
+
+    const state = this.getChannelGameState(channelId);
+
+    // Send current game state to refresh the miniapp
+    await this.sendWebappUpdate(channelId, 'initial_state', {
+      players: state.players,
+      deadPlayers: state.deadPlayers,
+      currentStory: state.currentStory,
+      gameActive: state.gameActive,
+      turnCount: state.turnCount || 0
+    });
+    console.log(`D&D Bot: Sent webapp_update for active user ${accountId} in ${channelId}`);
   }
 
 }
