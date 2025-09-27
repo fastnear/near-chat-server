@@ -471,15 +471,23 @@ Based on the player's class and creative action, make it work in the fantasy wor
 - Every action has consequences - good or bad
 
 RESPONSE FORMAT:
-Return your response as JSON with exactly this structure:
+Return ONLY a valid JSON object, no markdown formatting. Use this exact structure:
 {
-  "story": "Your 2-3 sentence story response (no markdown formatting). ALWAYS reference the full adventure context, not just this single action.",
+  "story": "Your 2-3 sentence story response. ALWAYS reference the full adventure context, not just this single action.",
   "updatedPlayers": {
-    // Complete updated player objects with any changes (hp, gold, equipment, alive status)
-    // Include ALL players, even if unchanged
-    // Remember: players are in a party together - one action can affect multiple players
+    "player.near": {
+      "class": "Rogue",
+      "hp": 8,
+      "maxHp": 10,
+      "gold": 75,
+      "alive": true,
+      "equipment": ["Twin Daggers", "Lockpicks"],
+      "joinedAt": 1234567890
+    }
   }
 }
+
+IMPORTANT: Do NOT wrap in ```json markdown blocks. Return raw JSON only!
 
 CONTEXT AWARENESS: You have access to the COMPLETE adventure history. Reference previous events, maintain story continuity, and remember character relationships and ongoing situations. This is a continuing story, not isolated actions.
 
@@ -516,16 +524,54 @@ Be dramatic, creative, and ruthlessly fair!`;
       const data = await response.json();
       const content = data.choices[0]?.message?.content || "The story continues...";
 
-      // Try to parse as JSON, fallback to plain text
-      try {
-        return JSON.parse(content);
-      } catch (e) {
-        return { story: content, updatedPlayers: null };
-      }
+      // Parse response with fallback handling for markdown-wrapped JSON
+      return this.parseAIResponse(content);
 
     } catch (error) {
       console.error("D&D Bot: Error generating story:", error);
       return { story: "The adventure continues as fate takes an unexpected turn...", updatedPlayers: null };
+    }
+  }
+
+  // Parse AI response with fallback for markdown-wrapped JSON
+  parseAIResponse(response) {
+    const responseStr = String(response);
+
+    try {
+      console.log("D&D Bot: Parsing AI response", responseStr);
+      return JSON.parse(responseStr);
+    } catch (error) {
+      // Try to extract JSON from markdown blocks
+      const markdownJsonMatch = responseStr.match(/```json\s*(\{.*?\})\s*```/s);
+      if (markdownJsonMatch) {
+        try {
+          console.log("D&D Bot: Found markdown JSON, extracting...");
+          return JSON.parse(markdownJsonMatch[1]);
+        } catch (e) {
+          console.error("D&D Bot: Failed to parse markdown JSON", e);
+        }
+      }
+
+      // Try to find any JSON object in the response
+      const jsonMatch = responseStr.match(/\{.*\}/s);
+      if (jsonMatch) {
+        try {
+          console.log("D&D Bot: Found JSON object, parsing...");
+          let cleanJson = jsonMatch[0].replace(/\n/g, '').trim();
+          cleanJson = cleanJson.replace(/;$/, ''); // Remove trailing semicolon
+          cleanJson = cleanJson.replace(/^json\{/, '{'); // Remove "json{" prefix
+          return JSON.parse(cleanJson);
+        } catch (e) {
+          console.error("D&D Bot: Failed to parse extracted JSON", e);
+        }
+      }
+
+      // Fallback: treat as plain story text
+      console.error("D&D Bot: Could not parse JSON, using as plain text:", responseStr);
+      return {
+        story: responseStr.replace(/```json|```/g, '').trim(),
+        updatedPlayers: null
+      };
     }
   }
 

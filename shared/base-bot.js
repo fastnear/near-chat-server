@@ -122,6 +122,75 @@ export class BaseBot {
     };
   }
 
+  /**
+   * Parse AI response with robust JSON extraction
+   * Handles markdown-wrapped JSON, plain JSON, and extraction fallbacks
+   */
+  parseAIResponse(response) {
+    // Handle null/undefined inputs
+    if (response === null || response === undefined) {
+      console.error(`${this.botId}: Received null/undefined AI response`);
+      return {
+        error: "Failed to parse AI response as JSON",
+        raw_response: String(response)
+      };
+    }
+
+    const responseStr = String(response);
+
+    try {
+      console.log(`${this.botId}: Parsing AI response`, responseStr);
+      return JSON.parse(responseStr);
+    } catch (error) {
+      // Try to extract JSON from markdown code blocks
+      const markdownJsonMatch = responseStr.match(/```json\s*(\{.*?\})\s*```/s);
+      if (markdownJsonMatch) {
+        try {
+          console.log(`${this.botId}: Found markdown JSON, extracting...`);
+          return JSON.parse(markdownJsonMatch[1]);
+        } catch (e) {
+          console.error(`${this.botId}: Failed to parse markdown JSON`, e);
+        }
+      }
+
+      // Try to find any JSON object in the response
+      const jsonMatch = responseStr.match(/\{.*\}/s);
+      if (jsonMatch) {
+        try {
+          console.log(`${this.botId}: Found JSON object, parsing...`);
+          let cleanJson = jsonMatch[0].replace(/\n/g, '').trim();
+          cleanJson = cleanJson.replace(/;$/, ''); // Remove trailing semicolon
+          cleanJson = cleanJson.replace(/^json\{/, '{'); // Remove "json{" prefix if present
+          return JSON.parse(cleanJson);
+        } catch (e) {
+          console.error(`${this.botId}: Failed to parse extracted JSON`, e);
+        }
+      }
+
+      // Try to extract from any other markdown code blocks
+      const markdownMatch = responseStr.match(/```(.*?)```/s);
+      if (markdownMatch) {
+        try {
+          let content = markdownMatch[1].replace(/\n/g, '').trim();
+          if (content.startsWith('json')) {
+            content = content.substring(4);
+          }
+          console.log(`${this.botId}: Found markdown content, parsing...`);
+          return JSON.parse(content);
+        } catch (e) {
+          console.error(`${this.botId}: Failed to parse markdown content`, e);
+        }
+      }
+
+      // Fallback: return error message
+      console.error(`${this.botId}: Could not parse JSON from AI response:`, responseStr);
+      return {
+        error: "Failed to parse AI response as JSON",
+        raw_response: responseStr.replace(/```json|```/g, '').trim()
+      };
+    }
+  }
+
   joinChannel(channelId) {
     if (this.joinedChannels.has(channelId)) return;
 

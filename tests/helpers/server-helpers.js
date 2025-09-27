@@ -39,9 +39,10 @@ export async function cleanupTestEnvironment() {
   // Reset ConfigManager state
   try {
     const { configManager } = await import('../../shared/config-manager.js');
-    configManager.loaded = false;
     configManager.channelsConfig = {};
     configManager.botsConfig = {};
+    configManager.lastLoadTime = 0; // Force reload on next access
+    configManager.configSource = 'file'; // Ensure file-only mode
   } catch (error) {
     // ConfigManager might not be loaded yet
   }

@@ -9,6 +9,7 @@ export default {
   ],
   collectCoverageFrom: [
     'src/**/*.js',
+    'shared/**/*.js',
     '!src/index.js', // Skip main entry point for now
     '!**/node_modules/**'
   ],

@@ -87,7 +87,7 @@ export function createTestChannelsConfig() {
       isPublic: false,
       rules: [
         {
-          type: 'requireAccount',
+          type: 'whitelist',
           accounts: ['private.testnet', 'alice.testnet']
         }
       ]

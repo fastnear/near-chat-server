@@ -142,8 +142,9 @@ describe('Channels Service', () => {
         mockUserChannelVisits
       );
 
+      // Restricted channel should be completely excluded from results
       const restrictedChannel = availableChannels[TESTNET_PRIVATE_CHANNEL_ID];
-      expect(restrictedChannel?.hasAccess).toBe(false);
+      expect(restrictedChannel).toBeUndefined();
     });
 
     test('should include member counts', async () => {
