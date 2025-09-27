@@ -487,7 +487,7 @@ Return ONLY a valid JSON object, no markdown formatting. Use this exact structur
   }
 }
 
-IMPORTANT: Do NOT wrap in ```json markdown blocks. Return raw JSON only!
+IMPORTANT: Do NOT wrap in \`\`\`json markdown blocks. Return raw JSON only!
 
 CONTEXT AWARENESS: You have access to the COMPLETE adventure history. Reference previous events, maintain story continuity, and remember character relationships and ongoing situations. This is a continuing story, not isolated actions.
 
